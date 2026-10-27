@@ -1,0 +1,62 @@
+// v0.6.1 headless check: hatch spacing (storm-spike root cause, forced repro), aerial body kits, cloud plants, gas haze + critters, caves, orbit push, regional bias.
+process.env.ID_SEED = process.env.ID_SEED || '6';
+const T = require('./node_env.js'), RS = global.RS, C = RS.Creature;
+const res = []; const ok = (n, p, i) => { res.push(!!p); console.log((p ? 'ok  ' : 'FAIL') + ' ' + n + (i !== undefined ? '  ' + JSON.stringify(i) : '')); };
+const ONLY = process.env.ONLY || '';
+const away = Sf => { const v = Sf.view; Sf.view = Object.assign({}, v, { y0: v.y0 - 4000, y1: v.y1 - 4000, cy: v.cy - 4000 }); };
+const fresh = (o = {}) => { const { Sf } = T.scene(Object.assign({ clear: true }, o)); return Sf; };
+const cm = (Sf, c) => { const W = Sf.W; let x = 0, y = 0, vx = 0, vy = 0, n = 0; for (const b of c.segs) for (const i of b.idx) { x += W.x[i]; y += W.y[i]; vx += W.x[i] - W.px[i]; vy += W.y[i] - W.py[i]; n++; } return [x / n, y / n, Math.hypot(vx, vy) / n / (W.dt || 1 / 60)]; };
+const overlap = (Sf, a, b) => { const W = Sf.W; let n = 0; for (const s of a.segs) for (const i of s.idx) for (const t of b.segs) for (const j of t.idx) if (Math.hypot(W.x[i] - W.x[j], W.y[i] - W.y[j]) < W.rad[i] + W.rad[j]) n++; return n; };
+const longG = () => { for (let s = 1; s < 400; s++) { const g = T.plain(s); const P = RS.Genome.express(g); if (P.segments >= 4 && !P.radial) return g; } };
+try {
+// 1 hatch spacing: an egg laid between two parents hatches a long body; the parents are not shoved (forced repro of the v0.5b storm spike)
+if (!ONLY || ONLY === 'hatch') { const run = on => { RS.UNCLASH = on; RS.idReset(6); T.t = 0; const Sf = fresh(); const a = T.add(Sf, T.plain(3), -18), b = T.add(Sf, T.plain(4), 18); away(Sf); T.run(Sf, 2); const g = longG();
+    const e = Sf.layEggFrom(g, (a.x + b.x) / 2, (a.y + b.y) / 2 - 10); T.run(Sf, .2); const k = Sf.hatch(e); const ov = overlap(Sf, k, a) + overlap(Sf, k, b); let mv = 0; for (let f = 0; f < 60; f++) { T.run(Sf, 1 / 60); mv = Math.max(mv, cm(Sf, a)[2], cm(Sf, b)[2]); } RS.UNCLASH = undefined; return { ov, mv: Math.round(mv), un: Sf.stats.unclash || 0 }; };
+  const old = run(false), now = run(true);
+  ok('1 a long hatchling between its parents no longer overlaps them; parents stay calm (old code overlaps)', old.ov > 0 && now.ov === 0 && now.mv <= 120 && now.un >= 1, { old, now }); }
+
+const gasWorld = () => { const U = RS.Universe(1); for (let i = 0; i < 40; i++) { const S = RS.System(U, i), gb = S.bodies.find(b => (RS.Planet.KIND[b.type] || {}).groundless); if (gb) { T.t = 0; const o = T.make({ sys: i, body: gb }); o.Sf.mods.guide = { step: 0, done: true, id: null }; return o.Sf; } } };
+const circ = (cx, cy, r, n = 14) => Array.from({ length: n }, (_, k) => [cx + Math.cos(k / n * 6.283) * r, cy + Math.sin(k / n * 6.283) * r]);
+// 2 aerial body kits: all four kits appear across genomes; on a cloud world every ohm moves with its kit (loco air:<kit>); on solid ground the locos are unchanged
+if (!ONLY || ONLY === 'air') { const seen = {}; for (let s = 1; s <= 300; s++) { const P = RS.Genome.express(RS.Genome.random(s * 31 + 7)); seen[RS.Body.air(P)] = (seen[RS.Body.air(P)] || 0) + 1; }
+  const Sg = gasWorld(), P = Sg.P, th = P.theta(Sg.view.cx, Sg.view.cy), cs = [0, 1, 2, 3, 4].map(k => { const t2 = th + (k - 2) * 110 / P.R, d = P.R - 150; return Sg.addCreature(RS.Genome.random(70 + k * 13), P.cx + Math.sin(t2) * d, P.cy - Math.cos(t2) * d, { growth: 1, quiet: true }); }); T.run(Sg, 1);
+  const Sn = fresh(), cn = T.add(Sn, T.plain(3), 0); T.run(Sn, .5);
+  ok('2 aerial kits: bladder, wings, sail and fins all occur; cloud-world ohms move with their kit; ground ohms keep their gait', RS.Body.AIR.every(k => seen[k] > 0) && cs.every(c => /^air:/.test(c.loco)) && !/^air:/.test(cn.loco), { seen, locos: cs.map(c => c.loco), ground: cn.loco }); }
+// 3 cloud critters: jellies and spore motes on cloud worlds only; no fish, birds or fireflies there; solid worlds keep their critters
+if (!ONLY || ONLY === 'critters') { const kinds = Sf => { const n = {}; for (const q of RS.Critters.state(Sf).pool) if (q.on) n[q.kind] = (n[q.kind] || 0) + 1; return n; };
+  const Sg = gasWorld(); T.run(Sg, 25); const g = kinds(Sg); const Sn = fresh(); T.run(Sn, 25); const n = kinds(Sn);
+  ok('3 cloud critters: jellies/motes on the cloud world, no fish/bird/fly there; none of them on solid ground', (g.jelly || 0) + (g.mote || 0) > 0 && !g.fish && !g.bird && !g.fly && !n.jelly && !n.mote, { gas: g, solid: n }); }
+// 4 hanging cloud plants: on a cloud world a music-grown plant hangs below the deck (every node under it) and stays in the plant budget
+if (!ONLY || ONLY === 'flora') { const Gr = RS.Grow, Sg = gasWorld(), P = Sg.P, th = P.theta(Sg.view.cx, Sg.view.cy), p = Gr.plant(Sg, th, { hz: 220 }), s0 = { act: .8, vel: .6, cons: 1, coh: .8, bright: .6 }; for (let k = 0; k < 40; k++) Gr.pulse(Sg, p, s0);
+  const dep = p.n.slice(1).map(nd => { const q = Gr.world(Sg, p, nd[1], nd[2]); return P.R - Math.hypot(q[0] - P.cx, q[1] - P.cy); });
+  ok('4 cloud plants hang under the deck: every grown node is below it; node budget kept', p.n.length > 3 && dep.every(d => d > 0) && p.n.length <= (Gr.MAXN || 999), { nodes: p.n.length, minDepth: Math.round(Math.min(...dep)), maxDepth: Math.round(Math.max(...dep)), hang: Gr.hang(Sg) }); }
+// 5 storm root cause #3 (forced): a young ohm steering at its parent straight through a sleeping ohm no longer pushes into it (thrust into a pressed neighbour is removed)
+if (!ONLY || ONLY === 'press') { const run = on => { RS.idReset(6); T.t = 0; const Sf = fresh(); const a = T.add(Sf, T.plain(3), -120), mid = T.add(Sf, T.plain(4), 0), k = T.add(Sf, T.plain(5), 120); away(Sf); T.run(Sf, 1); mid.lod = 1; let mv = 0;
+    for (let f = 0; f < 240; f++) { k.want = [Math.sign(a.x - k.x), 0]; k.wantMag = 1; T.run(Sf, 1 / 60); mv = Math.max(mv, cm(Sf, mid)[2]); } return { mv: Math.round(mv), unpress: Sf.stats.unpress || 0 }; };
+  const now = run(true); ok('5 an ohm pushing through a neighbour has its push into it removed; the neighbour stays calm', now.unpress > 0 && now.mv <= 120, now); }
+// 6 real caves: a cave's roof is a static rock overhang (pinned, silent, not grabbable, never saved) with an open mouth; ohms under it stay put
+if (!ONLY || ONLY === 'cave') { let { Sf } = T.scene({ clear: true }); const q0 = Sf.field.feat.find(q => q.kind === 'cave'); Sf = T.scene({ clear: true, th: q0.th }).Sf; const W = Sf.W, P = Sf.P, q = Sf.field.feat.find(f => f.k === q0.k), ci = Sf.chunkKey(P.chunkOf(q.th)); Sf.activate(ci); Sf.caveRoofs(ci);
+  const r = [...W.bodies.values()].find(b => b.meta && b.meta.cave === q.k); const [x, y] = P.surf(q.th); const c = Sf.addCreature(T.plain(3), x, y - 40, { growth: 1, energy: .9, quiet: true }); T.run(Sf, .5); const snap = r ? r.idx.map(i => [W.x[i], W.y[i]]) : []; T.run(Sf, 4);
+  const drift = r ? Math.max(...r.idx.map((i, k) => Math.hypot(W.x[i] - snap[k][0], W.y[i] - snap[k][1]))) : 99, lip = r ? r.idx[r.idx.length - 1] : 0, lipUp = r ? Sf.ground(W.x[lip]) - W.y[lip] : 0, pk = JSON.stringify(Sf.packChunk ? Sf.packChunk(ci) : {});
+  const grab = r ? Sf.hit(W.x[r.idx[6]], W.y[r.idx[6]]) : {}; const n2 = Sf.caveRoofs(ci);
+  ok('6 cave overhang: one pinned rock roof per cave (<= 40 particles), lip hangs open above the ground, still after 4 s, not grabbable, not saved, not doubled; ohm under it calm', !!r && r.idx.length <= 40 && r.idx.every(i => W.fl[i] & 4) && lipUp > 15 && drift < .01 && !grab.body && !/"cave"/.test(pk) && n2 === 0 && cm(Sf, c)[2] < 60, { n: r && r.idx.length, lipUp: Math.round(lipUp), drift, grab: !!grab.body, v: Math.round(cm(Sf, c)[2]) }); }
+// 7 orbit push through the real gesture: grab an object, drag it up and release fast -> it leaves and becomes a satellite; a slow release does not
+if (!ONLY || ONLY === 'orbit') { const run = v => { const { Sf } = T.scene({ clear: true }); const W = Sf.W, x = Sf.view.cx, gy = Sf.ground(x); const b0 = Sf.makeBlob(circ(x, gy - 30, 16)); const b = W.bodies.get(b0.id || b0); T.run(Sf, 1); const [cx, cy] = W.center(b), dx = cx - W.grav.cx, dy = cy - W.grav.cy, d = Math.hypot(dx, dy), up = [dx / d, dy / d];
+    Sf.grabStart(cx, cy); for (let k = 1; k <= 6; k++) { Sf.grabMove(cx + up[0] * k * 18, cy + up[1] * k * 18); T.run(Sf, 1 / 60); } Sf.grabEnd(up[0] * v, up[1] * v); T.run(Sf, 5); return { gone: !W.bodies.has(b.id), sats: Sf.stats.satellites || 0, esc: Math.round(Sf.orbit.escapeV()) }; };
+  const fast = run(1150), slow = run(500); ok('7 pushing an object into orbit works by gesture (fast upward release -> satellite); a slow throw falls back', fast.gone && fast.sats === 1 && !slow.gone && !slow.sats, { fast, slow }); }
+// 8 regional bias: an area remembers the pulse of the jams that formed there; a lone ohm there leans at most 3 % toward it, its scale and motif untouched
+if (!ONLY || ONLY === 'region') { const run = learn => { RS.idReset(6); T.t = 0; const Sf = fresh(); const c = T.add(Sf, T.plain(3), 0); away(Sf); T.run(Sf, 1); const m = c.mind, b0 = m.bpmT, mot = JSON.stringify(c.motif), sc = JSON.stringify(m.sys && m.sys.cents);
+    if (learn) Sf.region.learn(c.x, c.y, b0 * 1.3); T.run(Sf, 30); return { bpm: m.bpm, b0, mot: JSON.stringify(c.motif) === mot, sc: JSON.stringify(m.sys && m.sys.cents) === sc, at: Math.round(Sf.region.bpmAt(c.x, c.y)), saved: !!(Sf.mods.regionBpm) }; };
+  const off = run(false), on = run(true), lean = on.bpm / off.bpm - 1; ok('8 regional bias: a lone ohm leans toward its area\'s remembered jam pulse (0 < lean <= 3 %); scale and motif unchanged; remembered in the world mods', lean > .002 && lean <= .031 && on.mot && on.sc && on.at > 0 && on.saved, { off: +off.bpm.toFixed(2), on: +on.bpm.toFixed(2), lean: +(lean * 100).toFixed(2) + '%', at: on.at }); }
+// 9 soft-body slot reuse (the LIFO note): re-adding an ohm into freed slots between neighbours is calm in BOTH slot orders now that spawn clears limbs too
+if (!ONLY || ONLY === 'lifo') { const run = (seed, lifo) => { RS.LIFO = lifo; RS.idReset(seed); T.t = 0; const Sf = fresh(); const x = Sf.view.cx; const cs = [-60, -20, 20, 60].map((d, k) => T.add(Sf, T.plain(seed * 5 + k), x + d)); T.run(Sf, 2); Sf.removeCreature(cs[1]); T.run(Sf, .1); away(Sf); /* off screen: where re-adds happen unwatched (arrivals, returning walkers) */ T.add(Sf, T.plain(seed * 5 + 9), x - 20); let mv = 0; for (let f = 0; f < 180; f++) { T.run(Sf, 1 / 60); for (const c of Sf.creatures) if (!c.dead) mv = Math.max(mv, cm(Sf, c)[2]); } RS.LIFO = undefined; return Math.round(mv); };
+  const r = [[7, false], [8, false], [3, true], [7, true], [5, true], [1, false]].map(([s, l]) => run(s, l)); ok('9 re-added ohm (off screen) into freed slots: calm with lowest-first AND LIFO reuse (spawn without clearing: up to 233 px/s)', r.every(v => v <= 120), r); }
+// 10 teach by demonstration: play the same 4-note phrase twice (call, the ohm answers, call again) near an ohm -> it adopts the phrase as its motif; a different 2nd phrase does not teach
+if (!ONLY || ONLY === 'demo') { const run = same => { RS.idReset(6); T.t = 0; const Sf = fresh(); const c = T.add(Sf, T.plain(3), 0); T.run(Sf, 1); const M = Sf.M, bar = M.barDur(), dt16 = M.dt16(), g0 = c.genome ? Array.from(c.genome) : null, mot0 = JSON.stringify(c.motif);
+    const hz = [220, 247, 277, 330], hz2 = [330, 277, 247, 220], play = fs => { const t0 = Sf.now(); fs.forEach((f, k) => Sf.strikesP.push({ t: t0 + k * dt16 * 2, x: c.x + 40, y: c.y, f })); };
+    const waitBar = () => { const b = Math.floor(Sf.now() / bar); while (Math.floor(Sf.now() / bar) === b) T.run(Sf, 1 / 60); };
+    waitBar(); play(hz); T.run(Sf, bar * 1.2); waitBar(); waitBar(); T.run(Sf, bar * .05); play(same ? hz : hz2); T.run(Sf, bar * 3.5);
+    return { taught: Sf.stats.demoTaught || 0, answered: Sf.stats.playerAnswered || 0, changed: JSON.stringify(c.motif) !== mot0, genes: !g0 || Array.from(c.genome).every((v, i) => v === g0[i]), mot: c.motif }; };
+  const yes = run(true), no = run(false); ok('10 teach by demonstration: same phrase twice near an ohm -> new motif (genes untouched); a different phrase -> no teach; both phrases still answered', yes.taught === 1 && yes.changed && yes.genes && no.taught === 0 && !no.changed && yes.answered >= 2 && no.answered >= 2, { yes, no }); }
+} catch (e) { console.log('FAIL exception', e && e.stack); res.push(false); }
+const n = res.filter(Boolean).length; console.log(`v0.6.1: ${n}/${res.length} passed`); process.exit(n === res.length ? 0 : 1);

@@ -1,0 +1,44 @@
+// v08-dawbrain browser check (no screenshots, no audio capture): real touches through CDP. RS_PORT / PORT (default 8811) must serve THIS checkout's www.
+// the brain layer stays off until the DAW opens; live beads fill in; the stored tune sits behind as a ghost; the old edit gestures still edit the stored tune
+// (lattice add / remove, pinch close); a spot with only a live bead behaves like empty lane; nothing is drawn while the DAW is closed; no page errors; text-free.
+const { chromium } = require('playwright'); const PORT = process.env.PORT || process.env.RS_PORT || 8811;
+const res = []; const ok = (name, pass, info) => { res.push({ name, pass: !!pass, info }); console.log((pass ? 'ok  ' : 'FAIL') + ' ' + name + (info !== undefined ? '  ' + JSON.stringify(info) : '')); };
+(async () => { const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] }); const ctx = await b.newContext({ viewport: { width: 412, height: 860 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }); const p = await ctx.newPage();
+  const errs = []; p.on('pageerror', e => errs.push(e.message + ' @ ' + (e.stack || '').split('\n').slice(1, 3).join(' '))); p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  await p.goto(`http://localhost:${PORT}/index.html?fixed=1`); await p.evaluate(() => localStorage.clear()); await p.reload(); await p.waitForTimeout(1500); const cdp = await ctx.newCDPSession(p);
+  const T = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((q, i) => ({ x: q[0], y: q[1], id: q[2] == null ? i : q[2], radiusX: 4, radiusY: 4, force: 1 })) });
+  const W = ms => p.waitForTimeout(ms), E = (f, a) => p.evaluate(f, a);
+  const tap = async (x, y) => { await T('touchStart', [[x, y]]); await W(40); await T('touchEnd', []); await W(60); };
+  const twist = async (deg, cx = 206, cy = 430, r = 90, steps = 14) => { const a0 = -Math.PI / 4; const P = a => [[cx + Math.cos(a) * r, cy + Math.sin(a) * r, 0], [cx - Math.cos(a) * r, cy - Math.sin(a) * r, 1]]; await T('touchStart', P(a0)); for (let k = 1; k <= steps; k++) { await W(16); await T('touchMove', P(a0 + deg * Math.PI / 180 * k / steps)); } await W(30); await T('touchEnd', []); await W(120); };
+  const pinch = async (r0, r1, cx = 206, cy = 430, steps = 12, horiz = true) => { const P = r => horiz ? [[cx - r, cy, 0], [cx + r, cy, 1]] : [[cx, cy - r, 0], [cx, cy + r, 1]]; await T('touchStart', P(r0)); for (let k = 1; k <= steps; k++) { await W(16); await T('touchMove', P(r0 + (r1 - r0) * k / steps)); } await W(30); await T('touchEnd', []); await W(150); };
+  await tap(206, 300); await W(4000);
+  const s0 = await E(() => ({ has: !!RS.DawBrain, armed: RS.DawBrain && RS.DawBrain.armed, dom: [...document.querySelectorAll('body *')].filter(e => !['SCRIPT', 'CANVAS'].includes(e.tagName)).length }));
+  ok('brain layer loaded, recording off until the DAW opens; still no DOM UI', s0.has && !s0.armed && s0.dom === 0, s0);
+  await E(() => { const DB = RS.DawBrain, f = DB.frame; window.__fr = 0; DB.frame = (...a) => { window.__fr++; return f(...a); }; const ft = CanvasRenderingContext2D.prototype.fillText, st = CanvasRenderingContext2D.prototype.strokeText; window.__txt = 0; CanvasRenderingContext2D.prototype.fillText = function (...a) { if (RSAPP.daw.open) window.__txt++; return ft.apply(this, a); }; CanvasRenderingContext2D.prototype.strokeText = function (...a) { if (RSAPP.daw.open) window.__txt++; return st.apply(this, a); }; });
+  await twist(100); await W(900); const o1 = await E(() => ({ open: RSAPP.daw.open, armed: RS.DawBrain.armed, fr: window.__fr })); ok('twist opens the DAW river; the brain layer arms and draws', o1.open && o1.armed && o1.fr > 5, o1);
+  let live = null; for (let i = 0; i < 20 && !live; i++) { await W(1000); live = await E(() => { const D = RSAPP.daw, DB = RS.DawBrain, g = D.geo(RSAPP.Wd, RSAPP.Ht); for (const r of g.rows) { if (r.y < 0 || r.y + r.h > RSAPP.Ht) continue; const c = DB.ohmOf(r.L); if (c && DB.liveCount(c) >= 2) return { id: r.L.id, kind: r.L.kind, n: DB.liveCount(c), ga: DB.ghostA(r.L, false), x: (g.x0 + g.x1) / 2, y: r.y + r.h / 2 }; } return null; }); }
+  ok('live beads fill in on an ohm lane (what it really plays)', !!live, live); if (!live) { console.log('PW_DAWBRAIN ' + res.filter(r => r.pass).length + '/' + res.length); await b.close(); process.exit(1); }
+  ok('the stored tune drops to a ghost behind them', live.ga < .5, live.ga);
+  // cost of the brain layer per DAW frame (real canvas; brain on vs off)
+  const cost = await E(async () => { const D = RSAPP.daw, ctx = document.querySelector('canvas').getContext('2d'), Wd = RSAPP.Wd, Ht = RSAPP.Ht, dpr = devicePixelRatio, run = n => { const t0 = performance.now(); for (let i = 0; i < n; i++) D.render(ctx, Wd, Ht, dpr, 1); return (performance.now() - t0) / n; }; run(10); const on = run(60); RS.DAWBRAIN = false; const off = run(60); RS.DAWBRAIN = undefined; return { on: +on.toFixed(3), off: +off.toFixed(3) }; });
+  ok('brain layer adds < 1.5 ms per DAW frame', cost.on - cost.off < 1.5, cost);
+  // a spot with ONLY a live bead (no stored bead under the finger) hit-tests as empty lane (live beads are read-only)
+  const lo = await E(L => { const D = RSAPP.daw, DB = RS.DawBrain, g = D.geo(RSAPP.Wd, RSAPP.Ht), r = g.rows.find(r => r.L.id === L.id), c = DB.ohmOf(r.L), v = DB.view(c), now = c.mind.pos; for (const n of v.notes) { const age = now - n.pos; if (age < 0 || age > 28) continue; const x = g.x0 + (((n.pos % 32) + 32) % 32) / 32 * g.w, y = n.slot >= 0 && DB.drummer(c) ? DB.rowY(r, n.slot) : D.dy(r, n.deg); const h = D.beadAt(g, x, y); if (h && !h.n) return { x, y }; } return null; }, live);
+  ok('a live-only bead is not a handle (finger finds the empty lane there)', lo != null, lo);
+  // the old gestures edit the STORED tune: open the lattice, add a note, remove it, pinch back
+  const PAT = () => E(L => JSON.stringify(RSAPP.daw.pattern(RSAPP.daw.lane(L.id)).notes.map(n => [n.s, n.deg, n.chord])), live); const m0 = await PAT();
+  const spot = await E(L => { const D = RSAPP.daw, g = D.geo(RSAPP.Wd, RSAPP.Ht), r = g.rows.find(r => r.L.id === L.id); for (let x = g.x0 + 6; x < g.x1; x += 4) for (let y = r.y + 4; y < r.y + r.h - 4; y += 4) { const h = D.beadAt(g, x, y); if (h && !h.n) return [x, y]; } return null; }, live);
+  await tap(spot[0], spot[1]); await W(450); const pat = await E(L => ({ id: RSAPP.daw.pat && RSAPP.daw.pat.id, ga: RS.DawBrain.ghostA(RSAPP.daw.lane(L.id), true) }), live);
+  ok('tap empty lane still opens the lattice; there the stored tune is shown at full (live beads hidden)', String(pat.id) === String(live.id) && pat.ga === 1, pat);
+  const cell = await E(L => { const D = RSAPP.daw, g = D.geo(RSAPP.Wd, RSAPP.Ht), r = g.rows.find(r => r.L.id === L.id), p = D.pattern(r.L); for (let x = g.x0 + 10; x < g.x1; x += 6) for (let y = r.y + 30; y < r.y + r.h - 30; y += 6) { const h = D.beadAt(g, x, y), st = Math.floor(D.patS(g, r, x, p.len)); if (h && !h.n && st < p.len && !p.notes.some(n => n.s === st)) return [x, y]; } return null; }, live);
+  const ring0 = await E(L => JSON.stringify(RS.DawBrain.view(RS.DawBrain.ohmOf(RSAPP.daw.lane(L.id))).notes.slice(-3)), live);
+  await tap(cell[0], cell[1]); await W(300); const m1 = await PAT(), la = await E(() => RSAPP.lastDaw); ok('tap an empty lattice cell writes the stored tune', m1 !== m0 && la === 'add', [la]);
+  await tap(cell[0], cell[1]); await W(300); ok('tap that bead removes it again', (await E(() => RSAPP.lastDaw)) === 'remove' && (await PAT()) === m0);
+  await pinch(120, 20, 206, 400, 12, false); ok('pinch closed returns from the lattice', !(await E(() => RSAPP.daw.pat)));
+  const ga2 = await E(L => RS.DawBrain.ghostA(RSAPP.daw.lane(L.id), false), live); ok('right after the edit the ghost is lit (it shows what you changed)', ga2 > .5, ga2);
+  await W(1800); const ga3 = await E(L => { const DB = RS.DawBrain, Ln = RSAPP.daw.lane(L.id); return { a: DB.ghostA(Ln, false), live: DB.liveCount(DB.ohmOf(Ln)), sel: RSAPP.daw.sel.size, pat: !!RSAPP.daw.pat }; }, live); ok('... then settles back behind the live notes (full again only if the ohm has gone quiet)', ga3.live ? ga3.a < .5 : ga3.a === 1, ga3);
+  const tx = await E(() => window.__txt); ok('text-free (no fillText / strokeText while the DAW is open)', tx === 0, tx);
+  await twist(-100); await W(600); const f0 = await E(() => window.__fr); await W(1500); const f1 = await E(() => window.__fr); ok('DAW closed: the brain layer is not drawn', !(await E(() => RSAPP.daw.open)) && f1 === f0, [f0, f1]);
+  ok('no page errors', errs.length === 0, errs.slice(0, 3));
+  const pass = res.filter(r => r.pass).length; console.log('PW_DAWBRAIN ' + pass + '/' + res.length); await b.close(); process.exit(pass === res.length ? 0 : 1);
+})().catch(e => { console.log('FAIL crash ' + e.message); process.exit(1); });

@@ -1,0 +1,51 @@
+'use strict';
+// v0.5c: ambient critters + rare sky events. Visual only (no bodies, no hit-test, no sound except the meteor sparkle), one fixed pool.
+//  fireflies at night over land (blink on the beat), fish under the sea surface, a small bird flock by day; meteor showers at night, auroras on worlds with air.
+(function (G) {
+const RS = G.RS, TAU = Math.PI * 2, MAX = 18, MAXS = 6;
+const Cr = RS.Critters = { MAX, MAXS };
+const css = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+Cr.state = Sf => Sf.crit || (Sf.crit = { pool: Array.from({ length: MAX }, () => ({ on: false })), streaks: Array.from({ length: MAXS }, () => ({ on: false })), chk: 0, rare: null, n: 0, seq: 0 });
+Cr.alive = Sf => Cr.state(Sf).pool.filter(q => q.on).length;
+const free = S => S.pool.find(q => !q.on);
+const air = Sf => (Sf.env && Sf.env.atmo != null ? Sf.env.atmo : .5);
+const gas = Sf => !!(Sf.body && (Sf.body.type === 'gas' || Sf.body.type === 'ringed'));
+const cloud = Sf => !!(Sf.P && Sf.P.gas);   // v0.6.1: cloud worlds get cloud critters (jellies + spore motes) instead of fish / birds / fireflies; alt = depth below the deck
+const spawn = (Sf, S, kind, th, alt, o = {}) => { const q = free(S); if (!q) return null; const r = RS.rng(RS.hash('crit', Sf.P.seed || 1, ++S.seq)); Object.assign(q, { on: true, kind, th, alt, a0: alt, v: o.v != null ? o.v : (r() - .5) * 30, ph: r() * TAU, t0: Sf.now(), life: o.life || 20 + r() * 25, k: S.seq, flock: o.flock || 0 }); S.n++; return q; };
+const count = (S, k) => { let n = 0; for (const q of S.pool) if (q.on && q.kind === k) n++; return n; };
+// population rules near the view: cheap, checked twice a second
+Cr.tick = (Sf, dt) => { if (RS.CRITTERS === false || !Sf.view || !Sf.P) return; const S = Cr.state(Sf), P = Sf.P, tn = Sf.now(), day = Sf.day == null ? 1 : Sf.day, v = Sf.view, thc = P.theta(v.cx, v.cy), R = P.R;
+  for (const q of S.pool) if (q.on) { q.th += q.v * dt / Math.max(50, q.kind === 'jelly' || q.kind === 'mote' ? R - q.alt : R + q.alt); if (q.kind === 'fly') q.alt = Math.max(6, q.a0 + Math.sin(tn * .9 + q.ph) * 14); else if (q.kind === 'fish') { const dep = P.sea - P.height(q.th); if (dep < 10) { q.on = false; continue; } q.alt = dep * q.a0 + Math.sin(tn * .7 + q.ph) * Math.min(6, dep * .15); } else if (q.kind === 'bird') q.alt = q.a0 + Math.sin(tn * .5 + q.ph) * 10; else if (q.kind === 'jelly') q.alt = q.a0 + Math.sin(tn * .4 + q.ph) * 22; else if (q.kind === 'mote') q.alt = Math.max(30, q.alt - dt * (4 + (q.k % 3) * 2));
+    const off = Math.abs(((q.th - thc + Math.PI) % TAU + TAU) % TAU - Math.PI) * R; if (off > 1100 || tn - q.t0 > q.life || (q.kind === 'fly' && day > .5) || (q.kind === 'bird' && day < .25)) q.on = false; }
+  Cr.rareTick(Sf, S, tn, dt);
+  if (tn < S.chk) return; S.chk = tn + .5; if (cloud(Sf)) { const r = RS.rng(RS.hash('critg', P.seed || 1, Math.floor(tn * 2))), th = thc + (r() - .5) * 2 * 480 / R; if (count(S, 'jelly') < 4 && r() < .35) spawn(Sf, S, 'jelly', th, 80 + r() * 560, { v: (r() - .5) * 16, life: 30 + r() * 30 });
+    if (count(S, 'mote') < 9 && r() < .6) { const n = 2 + Math.floor(r() * 3), a0 = 120 + r() * 600; for (let k = 0; k < n; k++) spawn(Sf, S, 'mote', th + (k - n / 2) * 14 / R, a0 + k * 9, { v: (r() - .5) * 10, life: 18 + r() * 14 }); } return; } if (gas(Sf)) return; const r = RS.rng(RS.hash('critc', P.seed || 1, Math.floor(tn * 2))), side = (r() - .5) * 2 * 480 / R, th = thc + side, h = P.height(th), sea = P.sea > -1e8 && h < P.sea - 12;
+  if (day < .35 && !sea && count(S, 'fly') < 8 && r() < .7) spawn(Sf, S, 'fly', th, 18 + r() * 60, { v: (r() - .5) * 24 });
+  if (sea && count(S, 'fish') < 5 && r() < .5) spawn(Sf, S, 'fish', th, .25 + r() * .5, { v: (r() < .5 ? -1 : 1) * (14 + r() * 18) });   // a0 = depth fraction between the bed and the sea line
+  if (day > .5 && air(Sf) > .2 && count(S, 'bird') === 0 && r() < .08) { const dir = r() < .5 ? -1 : 1, th0 = thc - dir * 560 / R, n = 4 + Math.floor(r() * 3); for (let k = 0; k < n; k++) spawn(Sf, S, 'bird', th0 - dir * (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 16 / R - dir * Math.ceil(k / 2) * 14 / R, 230 + r() * 60 + Math.ceil(k / 2) * 8, { v: dir * 55, life: 30, flock: 1 }); } };
+// rare events: checked once a minute, seeded per planet; Cr.force(Sf, kind) for tests
+Cr.force = (Sf, k) => { const S = Cr.state(Sf), tn = Sf.now(); S.rare = { k, t0: tn, dur: k === 'meteor' ? 9 : 40, next: tn }; Sf.stats[k === 'meteor' ? 'rareMeteor' : 'rareAurora'] = (Sf.stats[k === 'meteor' ? 'rareMeteor' : 'rareAurora'] || 0) + 1; if (k === 'meteor') Cr.sparkle(Sf); return S.rare; };
+Cr.rareTick = (Sf, S, tn, dt) => { const day = Sf.day == null ? 1 : Sf.day;
+  if (!S.rare) { const m = Math.floor(tn / 60); if (m !== S.lastMin) { S.lastMin = m; if (m > 0 && day < .3 && !gas(Sf)) { const r = RS.rng(RS.hash('rare', Sf.P.seed || 1, m)), u = r(); if (u < .04) Cr.force(Sf, 'meteor'); else if (u < .07 && air(Sf) > .3) Cr.force(Sf, 'aurora'); } } }
+  const e = S.rare; if (!e) { for (const s of S.streaks) if (s.on && tn - s.t0 > s.life) s.on = false; return; } if (tn > e.t0 + e.dur) { S.rare = null; return; }
+  if (e.k === 'meteor' && tn >= e.next) { e.next = tn + .35 + ((e.next * 7.3) % 1) * .5; const s = S.streaks.find(q => !q.on); if (s) { const r = RS.rng(RS.hash('str', Sf.P.seed || 1, Math.floor(tn * 10))); Object.assign(s, { on: true, x: .15 + r() * .9, y: r() * .3, vx: -(.5 + r() * .4), vy: .35 + r() * .25, t0: tn, life: .6 + r() * .5 }); } }
+  for (const s of S.streaks) if (s.on && tn - s.t0 > s.life) s.on = false; };
+// the shower's one quiet sparkle: three soft high in-key notes, a beat apart
+Cr.sparkle = Sf => { const M = Sf.M; if (!M || !Sf.play || !Sf.view) return; const tg = Sf.now() + .05, b = M.beatDur ? M.beatDur() : .5; for (let k = 0; k < 3; k++) { const f = (M.degHz ? M.degHz([4, 2, 0][k], 0) : 660) * 4; Sf.play({ modes: [{ f, a: 1, d: .9 }, { f: f * 2.76, a: .25, d: .4 }], gain: .035, att: .003, send: .7, kind: 'sparkle', lane: 'env' }, tg + k * b * .5, Sf.view.cx, Sf.view.cy - 300); } Sf.stats.meteorSparkle = (Sf.stats.meteorSparkle || 0) + 1; };
+// screen-space sky layer (before the ridges): aurora ribbons + meteor streaks
+Cr.drawSky = (ctx, Sf, Wd, Ht, day) => { const S = Sf.crit; if (!S || !S.rare && !S.streaks.some(s => s.on)) return; const tn = Sf.now(), e = S.rare, pal = Sf.pal; ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  if (e && e.k === 'aurora') { const a = Math.min(1, (tn - e.t0) / 5, (e.t0 + e.dur - tn) / 6) * Math.max(0, 1 - day * 2.5), base = RS.Render && RS.Render.mix ? RS.Render.mix([80, 255, 160], pal.accent || [120, 200, 255], .35) : [90, 240, 170];
+    for (let L = 0; L < 3; L++) { const y0 = Ht * (.1 + L * .065), col = L === 1 ? [150, 110, 255] : base, pts = []; for (let k = 0; k <= 32; k++) { const x = k / 32 * Wd; pts.push([x, y0 + Math.sin(k * .45 + tn * (.3 + L * .13) + L * 2) * 18 + Math.sin(k * .17 - tn * .2) * 10]); }
+      for (const [w, al] of [[22, .05], [9, .08], [2.5, .14]]) { ctx.strokeStyle = css(col, al * a * (L === 1 ? .7 : 1)); ctx.lineWidth = w; ctx.beginPath(); pts.forEach(([x, y], k) => k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); }
+      ctx.strokeStyle = css(col, .07 * a); ctx.lineWidth = 3; ctx.beginPath(); for (let k = 0; k <= 32; k += 2) { const [x, y] = pts[k], h = 26 + 14 * Math.sin(k * 1.7 + tn * .8 + L); ctx.moveTo(x, y); ctx.lineTo(x, y + h); } ctx.stroke(); } }
+  for (const s of S.streaks) if (s.on) { const u = (tn - s.t0) / s.life, x = (s.x + s.vx * u * .5) * Wd, y = (s.y + s.vy * u * .5) * Ht, al = Math.sin(Math.PI * Math.min(1, u)); ctx.strokeStyle = css([255, 245, 225], .7 * al); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s.vx * 60, y - s.vy * 60); ctx.stroke(); }
+  ctx.restore(); };
+// world-space critters (after water): tiny shapes, one path each
+Cr.draw = (ctx, Sf, cam, t) => { const S = Sf.crit; if (!S) return; const P = Sf.P, tn = Sf.now(), beat = Sf.M && Sf.M.beatDur ? Sf.M.beatDur() : .5, bf = (tn / beat) % 1, pal = Sf.pal || {};
+  for (const q of S.pool) { if (!q.on) continue; const cw = q.kind === 'jelly' || q.kind === 'mote', rr = cw ? P.R - q.alt : P.R + P.height(q.th) + q.alt, x = P.cx + Math.sin(q.th) * rr, y = P.cy - Math.cos(q.th) * rr, ux = Math.sin(q.th), uy = -Math.cos(q.th), tx = -uy, ty = ux, sg = q.v >= 0 ? 1 : -1;
+    if (q.kind === 'fly') { const g = Math.max(.15, 1 - ((bf + (q.k % 4) * .25) % 1) * 2.5); ctx.fillStyle = css([230, 255, 140], .25 + .7 * g); ctx.beginPath(); ctx.arc(x, y, 1.6 + g * 1.4, 0, TAU); ctx.fill(); if (g > .6) { ctx.fillStyle = css([230, 255, 140], .12 * g); ctx.beginPath(); ctx.arc(x, y, 7, 0, TAU); ctx.fill(); } }
+    else if (q.kind === 'fish') { const c = pal.accent || [255, 200, 120], w = Math.sin(tn * 8 + q.ph) * 1.5; ctx.fillStyle = css(c, .55); ctx.beginPath(); ctx.ellipse(x, y, 6, 2.6, Math.atan2(ty, tx), 0, TAU); ctx.fill(); ctx.beginPath(); ctx.moveTo(x - tx * sg * 5, y - ty * sg * 5); ctx.lineTo(x - tx * sg * 10 + ux * (3 + w), y - ty * sg * 10 + uy * (3 + w)); ctx.lineTo(x - tx * sg * 10 - ux * (3 - w), y - ty * sg * 10 - uy * (3 - w)); ctx.closePath(); ctx.fill(); }
+    else if (q.kind === 'jelly') { const c = pal.accent || [190, 170, 255], pu = .5 + .5 * Math.sin(tn * 2.2 + q.ph), bb = Math.max(0, 1 - bf * 3), w = 5 + pu * 1.5; ctx.fillStyle = css(c, .22 + .25 * bb); ctx.beginPath(); ctx.ellipse(x, y, w, w * .7, Math.atan2(ty, tx), Math.PI, TAU); ctx.fill(); ctx.strokeStyle = css(c, .35); ctx.lineWidth = .9; ctx.beginPath(); for (const o of [-3, 0, 3]) { ctx.moveTo(x + tx * o, y + ty * o); ctx.quadraticCurveTo(x + tx * (o + Math.sin(tn * 1.7 + o) * 2) - ux * 6, y + ty * (o + Math.sin(tn * 1.7 + o) * 2) - uy * 6, x + tx * o - ux * (11 + pu * 3), y + ty * o - uy * (11 + pu * 3)); } ctx.stroke(); }
+    else if (q.kind === 'mote') { const c = pal.accent || [255, 220, 170], g = .5 + .5 * Math.sin(tn * 1.3 + q.ph); ctx.fillStyle = css(c, .25 + .35 * g); ctx.beginPath(); ctx.arc(x, y, 1.3 + g, 0, TAU); ctx.fill(); }
+    else { const f = Math.sin(tn * 9 + q.ph) * 3.5; ctx.strokeStyle = css([30, 28, 40], .7); ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(x - tx * 5 + ux * f, y - ty * 5 + uy * f); ctx.lineTo(x, y); ctx.lineTo(x + tx * 5 + ux * f, y + ty * 5 + uy * f); ctx.stroke(); } } };
+})(typeof window !== 'undefined' ? window : globalThis);

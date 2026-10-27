@@ -1,0 +1,12 @@
+// lean check: the guide. New game -> one normal guide creature; the gesture sequence advances only on the current step (from the real
+// gesture code paths), answers musically, persists in the save, and finishes (ghost fades) after all steps.
+const T = require('./node_env.js'); let pass = 0, tot = 0; const ok = (n, c, i) => { tot++; if (c) pass++; console.log((c ? 'ok   ' : 'FAIL ') + n + (i !== undefined ? '  ' + JSON.stringify(i) : '')); };
+const { Sf } = T.scene({ clear: true }); Sf.noSeedItems = Sf.noPatches = true; Sf.mods.guide = null; const g = RS.Guide.spawn(Sf); T.run(Sf, 1); const Gd = RS.Guide, st = Gd.state(Sf);
+ok('GUIDE spawns once as a normal creature near the landing point', g && g.guide && !RS.Guide.spawn(Sf) && Math.abs(g.x) < 400 && g.g.length === 241);   /* v0.8b6: + the gift gene */
+const n0 = T.notes.length; Gd.notify(Sf, 'catch'); const out = st.step === 0; const s = RS.Play.enter(Sf, g); const a1 = st.step === 1; T.run(Sf, .5);
+ok('GUIDE out-of-order gestures do nothing; the real tap-hold (play enter) advances + it answers with a phrase', out && a1 && T.notes.length > n0, { step: st.step });
+RS.Play.note(Sf, s, s.nodes[1], .6); const fin = s.handles.find(h => h.k === 'fin'); RS.Play.tweak(Sf, g, 'fin', .1, 0, {}); RS.EnvEdit.drag(Sf, g, 'A', [g.x + 30, g.y - 30]); const tp = RS.Play.tubePt(s, .3); RS.Play.down(Sf, s, tp[0], tp[1]); RS.Play.move(Sf, s, tp[0] + 9, tp[1] - 9); RS.Play.up(Sf, s);
+RS.Play.exit(Sf, s); const b = Sf.catch(g); T.run(Sf, .3); Sf.popBubble(b); T.run(Sf, .5); const before = st.step; Gd.notify(Sf, 'teach'); const s2 = RS.Play.enter(Sf, g); RS.Play.exit(Sf, s2);
+const mid = st.step; const o = T.add(Sf, T.plain(9), g.x + 160); T.run(Sf, .5); const inf = RS.Symbols.trace('infinity', (g.x + o.x) / 2, (g.y + o.y) / 2, 110)[0]; Sf.stroke(inf, inf.map((_, i) => i * 12)); const und = RS.Symbols.trace('undo', g.x, g.y - 200, 60)[0]; Sf.stroke(und, und.map((_, i) => i * 420 / und.length)); T.run(Sf, .3); { const H = Sf.glyphHold, e = H ? H.end : [0, 0], L = H ? H.size * .3 : 0; Sf.stroke([[e[0] - L, e[1] - L * .8], e, [e[0] - L, e[1] + L * .8]], [0, 90, 180]); }   // v0.8a O6: hook + '>'
+const pk = JSON.parse(JSON.stringify(Sf.pack())); ok('GUIDE full sequence (play, node, fin, halo, tube, catch, teach, exit, then the infinity + two-stroke undo glyphs drawn for real) completes; saved', mid === 8 && st.done && pk.mods.guide.done && before === 6, { step: st.step, before, mid });
+console.log(`guide ${pass}/${tot}`);

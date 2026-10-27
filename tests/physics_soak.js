@@ -1,0 +1,21 @@
+// Physics soak: crowded scenes for N simulated minutes with frame hitches (100-300 ms), overlapping spawns and fusions.
+// An INCIDENT = a creature (not grabbed/thrown by the player) whose centre speed > VMAX or body spin |w| > WMAX for >= 3 frames (1 s debounce).
+// usage: node tests/physics_soak.js [root] [--min 10]
+const path = require('path'), argv = process.argv.slice(2), root = path.resolve(argv[0] && !argv[0].startsWith('--') ? argv[0] : path.join(__dirname, '..')), mins = +(argv[argv.indexOf('--min') + 1]) || 10;
+const T = require(path.join(root, 'tests/node_env.js')); for (const m of ['store', 'render', 'daw', 'dna']) require(path.join(root, 'www/js', m + '.js'));
+const VMAX = 1200, WMAX = 14; const C = RS.Creature;
+const spin = (W, b) => { let cx = 0, cy = 0, vx = 0, vy = 0; const n = b.idx.length; for (const i of b.idx) { cx += W.x[i]; cy += W.y[i]; vx += W.x[i] - W.px[i]; vy += W.y[i] - W.py[i]; } cx /= n; cy /= n; vx /= n; vy /= n; let L = 0, I = 0;
+  for (const i of b.idx) { const rx = W.x[i] - cx, ry = W.y[i] - cy, ux = W.x[i] - W.px[i] - vx, uy = W.y[i] - W.py[i] - vy; L += rx * uy - ry * ux; I += rx * rx + ry * ry; } return { v: Math.hypot(vx, vy) / W.dt, w: I > 1e-6 ? L / I / W.dt : 0 }; };
+const res = { minutes: mins, frames: 0, creatureFrames: 0, incidents: 0, speed: 0, spinI: 0, maxV: 0, maxW: 0, hitches: 0, nanFix: 0, byCause: {} };
+const scenes = Math.max(1, Math.round(mins / 2.5)), perScene = mins * 60 / scenes;
+for (let sc = 0; sc < scenes; sc++) { T.t = 0; T.notes.length = 0; const o = T.make({ useed: 1 + sc, sys: sc % 2 ? 0 : 0 }), Sf = o.Sf; T.t += 1 / 60; Sf.step(1 / 60); if (argv.includes('--noclamp') && Sf.STAB) Object.assign(Sf.STAB, { wMax: 1e9, vMax: 1e9, wDamp: 0 }); if (argv.includes('--nopen')) Sf.W.penCap = 1e9; const x = Sf.view.cx, r = RS.rng(99 + sc);
+  for (let k = 0; k < 16; k++) T.add(Sf, RS.Genome.random(9000 + sc * 100 + k * 13), x - 200 + k * 25, { energy: .6 + r() * .4 });
+  const st = new Map(); let f = 0; const nF = Math.round(perScene * 60);
+  for (let i = 0; i < nF; i++) { let dt = 1 / 60; if (i % 300 === 150) { dt = .1 + r() * .2; res.hitches++; } T.t += dt; Sf.step(dt); f++; res.frames++;
+    if (i % 1800 === 900) { const cs = Sf.creatures.filter(c => !c.dead); const a = cs[Math.floor(r() * cs.length)]; if (a) T.add(Sf, RS.Genome.random(77 + i + sc), a.x, { energy: .9 }); }   // overlapping spawn
+    if (i % 2400 === 1200 && RS.Colony) { const cs = Sf.creatures.filter(c => !c.dead && !c.cluster); if (cs.length > 2) try { RS.Colony.fuse(Sf, cs[0], cs[1]); } catch (e) {} }
+    if (i % 3600 === 0) for (const c of Sf.creatures) c.breedCool = Math.min(c.breedCool || 0, 60);
+    for (const c of Sf.creatures) { if (c.dead || !c.segs[0] || c.grabbed || c.caught) continue; res.creatureFrames++; const s = spin(Sf.W, c.segs[0]); res.maxV = Math.max(res.maxV, s.v); res.maxW = Math.max(res.maxW, Math.abs(s.w));
+      const q = st.get(c) || { n: 0, last: -99 }; const bad = s.v > VMAX || Math.abs(s.w) > WMAX; q.n = bad ? q.n + 1 : 0; if (q.n === 3 && T.t - q.last > 1) { q.last = T.t; res.incidents++; if (s.v > VMAX) res.speed++; else res.spinI++; const k = (c.loco || c.P.style) + (RS.Abilities && RS.Abilities.of(c.g).length ? '+ab' : ''); res.byCause[k] = (res.byCause[k] || 0) + 1; if (argv.includes('--diag') && (res.diag = res.diag || []).length < 25) { const b = c.segs[0], W = Sf.W; let area = 0; const id = b.idx; for (let j = 0; j < id.length; j++) { const p1 = id[j], p2 = id[(j + 1) % id.length]; area += W.x[p1] * W.y[p2] - W.x[p2] * W.y[p1]; } res.diag.push({ t: +T.t.toFixed(1), v: Math.round(s.v), w: +s.w.toFixed(1), sinceHitch: (i % 300) - 150, segs: c.segs.length, cl: !!c.cluster, area: Math.round(area / 2), rest: Math.round(b.restArea || 0), nPts: id.length, thrown: c.thrownT != null, age: Math.round(c.age || 0), grow: +(c.growth || 0).toFixed(2), sp: c.spawnT != null ? +(T.t - c.spawnT).toFixed(1) : null, ab: RS.Abilities.of(c.g).map(a => a.id || a).join('+') }); } } st.set(c, q); } }
+  res.nanFix += Sf.W.nanFix || 0; }
+res.maxV = Math.round(res.maxV); res.maxW = +res.maxW.toFixed(1); res.incidentsPerCreatureHour = +(res.incidents / (res.creatureFrames / 60 / 3600)).toFixed(2); console.log(JSON.stringify(res));

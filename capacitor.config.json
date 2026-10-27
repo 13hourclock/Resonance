@@ -1,0 +1,6 @@
+{
+  "appId": "com.lensure.resonance",
+  "appName": "Resonance",
+  "webDir": "www",
+  "android": { "backgroundColor": "#000000" }
+}

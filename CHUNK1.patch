@@ -1,0 +1,617 @@
+diff -ruN -x node_modules softsound_v08prep_base/www/index.html softsound_v08prep/www/index.html
+--- a/www/index.html	2026-10-23 02:32:14.000000000 -0600
++++ b/www/index.html	2026-10-23 03:58:56.226126036 -0600
+@@ -17,5 +17,5 @@
+ <script src="js/social.js"></script>
+ <script src="js/critters.js"></script>
+ <script src="js/events.js"></script><script src="js/voyage.js"></script><script src="js/pairs6.js"></script><script src="js/surface.js"></script>
+-<script src="js/render.js"></script><script src="js/daw.js"></script><script src="js/dna.js"></script><script src="js/app.js"></script>
++<script src="js/render.js"></script><script src="js/daw.js"></script><script src="js/dna.js"></script><script src="js/persist.js"></script><script src="js/app.js"></script>
+ </body></html>
+diff -ruN -x node_modules softsound_v08prep_base/www/js/app.js softsound_v08prep/www/js/app.js
+--- a/www/js/app.js	2026-10-23 02:32:14.000000000 -0600
++++ b/www/js/app.js	2026-10-23 04:20:20.731659692 -0600
+@@ -10,7 +10,7 @@
+ if (St.boot) St.boot(); App.meta = St.meta(); App.U = RS.Universe(App.meta.useed); App.sysCache = {};
+ App.system = i => { if (!App.sysCache[i]) { const S = RS.System(App.U, i, null); const om = (App.meta.orbit[App.meta.useed] || {})[i]; if (om) for (const k in om) { const b = S.bodies[k]; if (b) { b.mult = om[k].mult; b.a = om[k].a; } } App.sysCache[i] = S; } return App.sysCache[i]; };
+ App.bodyKey = (S, b) => b.kind === 'moon' ? 'p' + S.bodies.find(p => p.moons.includes(b)).k + 'm' + b.k : 'p' + b.k;
+-App.surfKey = (S, b) => b.ark ? St.key('ark') : St.surfKey(App.meta.useed, S.i, App.bodyKey(S, b));
++App.surfKey = (S, b) => RS.Save ? RS.Save.worldKey(App.meta.useed, S, b, App.bodyKey) : b.ark ? St.key('ark') : St.surfKey(App.meta.useed, S.i, App.bodyKey(S, b));   /* v0.8 H: rs2:w:<useed>:<sys>:<body|ark> */
+ App.gM = RS.Music(RS.hash('galaxy', App.meta.useed));   // the galaxy's own slow music
+ // ---------------- canvas ----------------
+ const cv = App.canvas = document.getElementById('c'), ctx = App.ctx = cv.getContext('2d', { alpha: false });
+@@ -24,10 +24,10 @@
+ App.updateTrail = () => { App.trail = ['galaxy', 'system', 'surface', 'dna'].slice(0, ['galaxy', 'system', 'surface', 'dna'].indexOf(App.level) + 1); };
+ // ----- surface
+ App.enterSurface = (sysI, body, at) => { App.resetGesture(); App.leaveSurface(); const S = App.system(sysI); App.persona = App.persona && App.persona.u === App.U.seed ? App.persona : Object.assign(RS.galaxyPersona(App.U), { u: App.U.seed }); const M = RS.Music(RS.hash('m', body.seed), App.persona); const key = App.surfKey(S, body), mods = Object.assign({ water: 0, light: 0 }, (App.freshKey === key ? {} : (App.meta.mods[key] || {})));
+-  if (mods.cloud == null) mods.cloud = App.freshKey !== key && St.get(key) ? 0 : 1;   /* v0.6: a world saved before cloud worlds existed keeps its solid ground (a giant Wilbow already visited stays as he saw it) */
++  if (mods.cloud == null) mods.cloud = App.freshKey !== key && (RS.Save ? RS.Save.has(key) : St.get(key)) ? 0 : 1;   /* v0.6: a world saved before cloud worlds existed keeps its solid ground (a giant Wilbow already visited stays as he saw it) */
+   const Sf = RS.Surface({ M, A, sys: S, body, key, mods, galaxy: App.persona, useed: App.meta.useed, onLineage: (c, Sf2) => App.lineage(c, Sf2) }); RS.paletteMusic(M, Sf.pal); M.plan = RS.Theory.plan(RS.hash('plan', body.seed)); M.t0 = now();
+   Sf.seedPool = { take: () => { const D = App.meta.drift || [], i = D.findIndex(s => s.fromKey !== key); return i < 0 ? null : D.splice(i, 1)[0]; } };   // seeds launched by 'seed' creatures drift on comets and land here inside meteorites
+-  const data = App.freshKey === key ? null : St.get(key); if (data) Sf.unpack(data, Date.now());   /* v0.7 I: a fresh launch never auto-loads (saves still write) */ App.Sf = Sf; Sf.eggOn = true; App.sysI = sysI; App.body = body; App.daw = RS.DAW(Sf);
++  const data = App.freshKey === key ? null : RS.Save ? RS.Save.loadWorld(key) : St.get(key); if (data) Sf.unpack(data, Date.now()); if (RS.Save) RS.Save.attach(Sf, key, data);   /* v0.8 H: chunked load + idle saver */   /* v0.7 I: a fresh launch never auto-loads (saves still write) */ App.Sf = Sf; Sf.eggOn = true; App.sysI = sysI; App.body = body; App.daw = RS.DAW(Sf);
+   // pending arrivals: bubbles carried here, seeds planted from orbit
+   const th = at == null || at === 0 ? 0 : (Sf.landSpot ? Sf.landSpot(at, { r: 40 }) : at), F = Sf.frameAt(th), p = [F.sx + F.ux * 160, F.sy + F.uy * 160]; App.cam = { x: p[0], y: p[1], z: 1, th };   /* v0.6: the camera arrives along the local up at any angle (theta 0 = same spot as before) */
+   const seeds = (App.meta.seeds || {})[key]; if (seeds && seeds.length) { App.pendingSeeds = seeds.slice(); App.meta.seeds[key] = []; }
+@@ -36,7 +36,7 @@
+   if (App.carried.length) { Sf.receiveBubbles(App.carried, App.cam.x, App.cam.y + 60); App.carried = []; }
+   App.level = 'surface'; App.updateTrail(); return Sf; };
+ App.leaveSurface = () => { if (!App.Sf) return; App.clayHatch('leave'); if (App.Sf.seedOut && App.Sf.seedOut.length) { App.meta.drift = (App.meta.drift || []).concat(App.Sf.seedOut.map(s => Object.assign({ fromKey: App.Sf.key }, s))).slice(-12); App.Sf.seedOut = []; } App.leaving = true; App.save(); App.leaving = false; const b = App.Sf.takeBubbles(); if (b.length) App.carried = App.carried.concat(b); App.meta.alive[App.meta.useed + ':' + App.sysI] = App.Sf.aliveness(); St.saveMeta(App.meta); App.Sf = null; App.daw = null; };
+-App.save = () => { if (!App.Sf) return; const Sf = App.Sf; if (RS.Voyage) { RS.Voyage.drain(App.meta, Sf, b => App.surfKey(Sf.sys, b)); if (!App.leaving) RS.Voyage.arrive(App.meta, Sf, Sf.key, Date.now(), { returnsOnly: true, offscreen: true }); }   /* v0.6: travellers leave into meta; walkers whose trip is over come home off-screen */ St.set(Sf.key, Sf.pack()); App.meta.mods[Sf.key] = Sf.mods; App.meta.alive[App.meta.useed + ':' + App.sysI] = Sf.aliveness(); St.saveMeta(App.meta); App.savedAt = performance.now(); };
++App.save = light => { if (!App.Sf) return;   /* v0.8 H: light = meta only (called by the idle saver after a world header write) */ const Sf = App.Sf; if (RS.Voyage) { RS.Voyage.drain(App.meta, Sf, b => App.surfKey(Sf.sys, b)); if (!App.leaving) RS.Voyage.arrive(App.meta, Sf, Sf.key, Date.now(), { returnsOnly: true, offscreen: true }); }   /* v0.6: travellers leave into meta; walkers whose trip is over come home off-screen */ if (light !== true) { if (RS.Save) RS.Save.flush(Sf); else St.set(Sf.key, Sf.pack()); } App.meta.mods[Sf.key] = Sf.mods; App.meta.alive[App.meta.useed + ':' + App.sysI] = Sf.aliveness(); St.saveMeta(App.meta); App.savedAt = performance.now(); };
+ App.lineage = (c, Sf) => { const L = App.meta.lineage; if (L.find(e => e.id === c.id)) return; L.push({ id: c.id, sys: App.sysI, useed: App.meta.useed, parents: c.parents || null, ab: (c.P.abil || []).map(a => a.id), col: c.col, t: Date.now() }); if (L.length > 400) L.shift(); };
+ App.syncView = () => { const Sf = App.Sf, cam = App.cam; if (!Sf) return; const r = Math.hypot(App.Wd, App.Ht) / cam.z * .62; Sf.view = { x0: cam.x - r, x1: cam.x + r, y0: cam.y - r, y1: cam.y + r, cx: cam.x, cy: cam.y, z: cam.z }; cam.th = Sf.P.theta(cam.x, cam.y); };
+ // ----- galaxy & system cameras
+@@ -173,9 +173,17 @@
+ let gd = null;
+ H.galaxy = { down: (x, y) => { gd = { x0: x, y0: y, cam0: { ...App.gcam } }; }, move: (x, y) => { if (!gd) return; const k = Math.min(App.Wd, App.Ht) * .48 * App.gcam.z; App.gcam.x = gd.cam0.x - (x - gd.x0) / k; App.gcam.y = gd.cam0.y - (y - gd.y0) / k; }, up: () => { gd = null; },
+   tap: (x, y) => { const s = App.starAt(x, y); if (s) { const f = 220 * Math.pow(2, ((s.wl - 400) / 300)); A.play({ modes: [{ f, a: 1, d: 1.5 }], gain: .06, att: .02, send: .8 }, now() + .01); } },
+-  doubleTap: (x, y) => { const s = App.starAt(x, y, 24); if (s) { App.sysI = s.i; App.scam = { z: 1, x: 0, y: 0 }; App.go('system'); } else { const [hx, hy] = homeXY(); App.fly = { from: { ...App.gcam }, to: { x: hx, y: hy, z: 6 }, t0: performance.now() }; App.sweep(true); } },
++  doubleTap: (x, y) => { const gu = App.smudgeAt(x, y); if (gu != null) return App.flyGalaxy(gu); const s = App.starAt(x, y, 24); if (s) { App.sysI = s.i; App.scam = { z: 1, x: 0, y: 0 }; App.go('system'); } else { const [hx, hy] = homeXY(); App.fly = { from: { ...App.gcam }, to: { x: hx, y: hy, z: 6 }, t0: performance.now() }; App.sweep(true); } },
+   two: (ph, info) => { if (ph === 'start') { App.gcam0 = { ...App.gcam }; App.gPinchOut = 0; return; } if (ph === 'move') { App.gcam.z = RS.clamp(App.gcam0.z * info.ratio, .35, 40); if (info.ratio < .6 && App.gcam0.z <= .5) App.gPinchOut = App.gPinchOut || performance.now(); }
+     if (ph === 'end') { if (App.gcam.z > 24) { const s = App.starAt(info.cx, info.cy, 80) || App.starAt(App.Wd / 2, App.Ht / 2, 200); if (s) { App.sysI = s.i; App.scam = { z: 1, x: 0, y: 0 }; App.go('system'); } } else if (App.gPinchOut && App.gcam.z <= .36) App.newUniverse(); } }, cancel: () => { } };
++/* v0.8 H (Q59 default, flagged gesture): at the widest galaxy zoom, every other galaxy where you changed a world shows as a soft smudge at the
++   screen edge; double tap one to fly there (the same double tap that already enters a star or flies home). */
++App.wayBack = /[?&]q59=1/.test((G.location && G.location.search) || '');   /* Q59 not yet approved: the smudge gesture is OFF unless ?q59=1 (or App.wayBack = true); off = galaxy gestures exactly as v0.7 */
++App.smudges = () => { if (!RS.Save || !App.wayBack || App.gcam.z > .5) return []; const us = RS.Save.galaxies().filter(u => u !== App.meta.useed), Wd = App.Wd, Ht = App.Ht;
++  return us.map(u => { const a = (RS.hash('gal', u) % 3600) / 3600 * TAU; return { u, x: Wd / 2 + Math.cos(a) * Wd * .43, y: Ht / 2 + Math.sin(a) * Ht * .43 }; }); };
++App.smudgeAt = (x, y) => { let best = null, bd = 34; for (const g of App.smudges()) { const d = Math.hypot(g.x - x, g.y - y); if (d < bd) { bd = d; best = g.u; } } return best; };
++App.drawSmudges = t => { const al = RS.clamp((.5 - App.gcam.z) / .15, 0, 1); if (al <= 0) return; for (const g of App.smudges()) { const h = (g.u * 67) % 360, R = 26 + 3 * Math.sin(t * 1.3 + g.u), rg = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, R); rg.addColorStop(0, `hsla(${h},70%,70%,${.55 * al})`); rg.addColorStop(1, `hsla(${h},60%,40%,0)`); ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(g.x, g.y, R, 0, TAU); ctx.fill(); } };
++App.flyGalaxy = u => { App.meta.useed = u; St.saveMeta(App.meta); App.U = RS.Universe(u); App.sysCache = {}; App.gM = RS.Music(RS.hash('galaxy', u)); App.gcam = { x: 0, y: 0, z: 1 }; App.sweep(true); App.sweep(false); App.iris = performance.now(); App.stats.flights = (App.stats.flights || 0) + 1; };
+ App.newUniverse = () => { App.meta.useed++; St.saveMeta(App.meta); App.U = RS.Universe(App.meta.useed); App.sysCache = {}; App.gM = RS.Music(RS.hash('galaxy', App.meta.useed)); App.gcam = { x: 0, y: 0, z: 1 }; App.sweep(true); App.sweep(false); App.iris = performance.now(); App.stats.universes = (App.stats.universes || 0) + 1; };
+ // ---------------- recording (loop drawn around the sky star) ----------------
+ App.REC_MAX = 60; App.toggleRecord = () => { if (App.rec) { if (App.rec.state !== 'inactive') App.rec.stop(); return; } try { const vs = cv.captureStream(30), dest = A.recDest(); const st = new MediaStream([...vs.getVideoTracks(), ...(dest ? dest.stream.getAudioTracks() : [])]);
+@@ -192,7 +200,7 @@
+ try { const Ap = G.Capacitor && G.Capacitor.Plugins && G.Capacitor.Plugins.App; if (Ap) Ap.addListener('backButton', () => { if (!App.back() && Ap.minimizeApp) Ap.minimizeApp(); }); } catch (e) { }
+ G.addEventListener('popstate', () => { App.back(); history.pushState({ rs: 1 }, ''); }); try { history.pushState({ rs: 1 }, ''); } catch (e) { }
+ // ---------------- autosave ----------------
+-setInterval(() => { if (App.Sf) App.save(); }, 10000);
++if (!RS.Save) setInterval(() => { if (App.Sf) App.save(); }, 10000);   /* v0.8 H: replaced by RS.Save idle-time saving (pumped from App.frame) */
+ /* v0.6.2: how long (ms) the finger rested within ~8 screen px of where it lifted. No move events arrive while a finger is still, so this is lift time minus the
+    time it arrived there. Used only by the spiral (hold at the end = clay window); every other ink stroke ignores it. */
+ App.endStill = s => { const n = s.pts.length; if (n < 2) return 0; const L = s.pts[n - 1], z = App.cam.z || 1; let k = n - 1; while (k > 0 && Math.hypot(s.pts[k - 1][0] - L[0], s.pts[k - 1][1] - L[1]) * z < 8) k--; return performance.now() - s.times[k]; };
+@@ -201,7 +209,7 @@
+ // ---------------- main loop ----------------
+ let lastF = performance.now();
+ App.frame = () => { const t0 = performance.now(), dt = Math.min(.05, (t0 - lastF) / 1000); lastF = t0; A.pump && A.pump(); const Wd = App.Wd, Ht = App.Ht, dpr = App.dpr;
+-  if (App.level === 'surface' || App.level === 'dna') { const Sf = App.Sf; if (Sf) { if (App.zoomInto) { App.cam.z = Math.min(1, App.cam.z * 1.06 + .002); if (App.cam.z >= 1) App.zoomInto = 0; } App.syncView(); const s0 = performance.now(); Sf.step(dt); App.simT = performance.now() - s0; } }
++  if (App.level === 'surface' || App.level === 'dna') { const Sf = App.Sf; if (Sf) { if (App.zoomInto) { App.cam.z = Math.min(1, App.cam.z * 1.06 + .002); if (App.cam.z >= 1) App.zoomInto = 0; } App.syncView(); const s0 = performance.now(); Sf.step(dt); App.simT = performance.now() - s0; if (RS.Save) RS.Save.pump(Sf); } }
+   const r0 = performance.now(); App.render(dt); App.renT = performance.now() - r0; (App.prof = App.prof || []).push([App.simT || 0, App.renT]); if (App.prof.length > 120) App.prof.shift(); if (App.level !== 'surface' && App.level !== 'dna') App.spaceMusic();
+   const ft = performance.now() - t0; App.ft.push(ft); if (App.ft.length > 60) App.ft.shift(); App.stats.frames++; App.stats.maxFt = Math.max(App.stats.maxFt, ft); if (ft > 16.7) App.stats.slow++;
+   // adaptive DPR: hold the frame budget
+@@ -250,8 +258,9 @@
+   if (S.belt) { const r = RS.rng(S.belt.seed); ctx.fillStyle = 'rgba(180,170,150,.5)'; for (let k = 0; k < S.belt.n; k++) { const a = r() * TAU + t * .02, d = S.belt.a * sc * (1 + (r() - .5) * .12); ctx.fillRect(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 1.5, 1.5); } }
+   for (const b of S.bodies) { ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); for (let k = 0; k <= 64; k++) { const [x, y] = RS.kepler(Object.assign({}, b, { M0: k / 64 * TAU }), 0, 1); k ? ctx.lineTo(cx + x * sc, cy + y * sc) : ctx.moveTo(cx + x * sc, cy + y * sc); } ctx.stroke();
+     const [x, y] = App.bodyScreen(S, b, t), R = 4 + b.size * 3, alive = App.meta.alive[App.meta.useed + ':' + S.i] || 0; ctx.fillStyle = css(b.col); ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill(); ctx.strokeStyle = css(RS.Render.mix(b.col, [255, 255, 255], .5), .3 + b.atmo * .4); ctx.lineWidth = 2 + b.atmo * 3; ctx.beginPath(); ctx.arc(x, y, R + 2, 0, TAU); ctx.stroke();
++    if (RS.Save && RS.Save.isChanged(App.surfKey(S, b))) { ctx.strokeStyle = `rgba(255,236,190,${.25 + .15 * Math.sin(t * 1.7)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, R + 7, 0, TAU); ctx.stroke(); }   /* v0.8 H: a world you changed */
+     if (b.rings) { ctx.strokeStyle = css(b.col, .6); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(x, y, R * 2, R * .6, .3, 0, TAU); ctx.stroke(); }
+-    for (const m of b.moons) { const [mx, my] = App.bodyScreen(S, m, t); ctx.fillStyle = m.ark ? 'rgb(140,220,180)' : 'rgb(170,170,170)'; ctx.beginPath(); ctx.arc(mx, my, 2 + m.size * 4, 0, TAU); ctx.fill(); if (m.ark) { ctx.strokeStyle = `rgba(140,255,200,${.4 + .4 * Math.sin(t * 3)})`; ctx.beginPath(); ctx.arc(mx, my, 9 + Math.sin(t * 3) * 2, 0, TAU); ctx.stroke(); } } }
++    for (const m of b.moons) { const [mx, my] = App.bodyScreen(S, m, t); ctx.fillStyle = m.ark ? 'rgb(140,220,180)' : 'rgb(170,170,170)'; ctx.beginPath(); ctx.arc(mx, my, 2 + m.size * 4, 0, TAU); ctx.fill(); if (RS.Save && RS.Save.isChanged(App.surfKey(S, m))) { ctx.strokeStyle = 'rgba(255,236,190,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(mx, my, 6 + m.size * 4, 0, TAU); ctx.stroke(); } if (m.ark) { ctx.strokeStyle = `rgba(140,255,200,${.4 + .4 * Math.sin(t * 3)})`; ctx.beginPath(); ctx.arc(mx, my, 9 + Math.sin(t * 3) * 2, 0, TAU); ctx.stroke(); } } }
+   if (S.comet) { const [x, y] = RS.kepler(S.comet, t, App.gM.barDur()); ctx.strokeStyle = 'rgba(200,230,255,.6)'; ctx.beginPath(); ctx.moveTo(cx + x * sc, cy + y * sc); ctx.lineTo(cx + x * sc * 1.08, cy + y * sc * 1.08); ctx.stroke(); }
+   if (sysd && sysd.pts.length > 1) { ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2; ctx.beginPath(); sysd.pts.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); } };
+ App.drawGalaxy = () => { const Wd = App.Wd, Ht = App.Ht, t = now(), css = RS.Render.css, U = App.U; if (App.fly) { const k = RS.clamp((performance.now() - App.fly.t0) / 1400, 0, 1), e = k * k * (3 - 2 * k); for (const q of ['x', 'y', 'z']) App.gcam[q] = App.fly.from[q] + (App.fly.to[q] - App.fly.from[q]) * e; if (k >= 1) App.fly = null; }
+@@ -259,6 +268,7 @@
+   for (const s of U.systems) { const [x, y] = App.gScreen(s); if (x < -20 || y < -20 || x > Wd + 20 || y > Ht + 20) continue; const al = App.meta.alive[App.meta.useed + ':' + s.i] || 0, r = (.6 + s.size * .8) * Math.sqrt(App.gcam.z) * (1 + al), S = App.gcam.z > 4 ? App.system(s.i) : null;
+     ctx.fillStyle = css(s.rgb, .5 + al * .5); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); if (al > .05) { ctx.fillStyle = css(s.rgb, al * .25); ctx.beginPath(); ctx.arc(x, y, r * 4, 0, TAU); ctx.fill(); }
+     if (S && S.life) { const p = .5 + .5 * Math.sin(t * 2 + s.i); ctx.strokeStyle = `rgba(180,255,200,${.15 + p * .35})`; ctx.beginPath(); ctx.arc(x, y, r * 3 + p * 4, 0, TAU); ctx.stroke(); } }
++  App.drawSmudges(t);   // v0.8 H: remembered galaxies
+   // home beacon
+   { const [x, y] = App.gScreen(U.sys(0)); ctx.strokeStyle = `rgba(140,255,200,${.5 + .4 * Math.sin(t * 3)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 10 + 4 * Math.sin(t * 3), 0, TAU); ctx.stroke(); }
+   // lineage constellations: parent -> child links between the systems where they were born
+@@ -280,8 +290,8 @@
+   return { seed, cat: 'rocky', sysI: 0, bk: ['p', 0], th: r() * TAU }; };
+ App.freshStart = seed => { if (seed == null) { const u = new Uint32Array(1); (G.crypto && G.crypto.getRandomValues ? G.crypto.getRandomValues(u) : (u[0] = Math.floor(Math.random() * 4294967295))); seed = (u[0] % 2000000000) + 1000; }
+   const pk = App.freshPick(seed); App.meta.useed = seed; App.U = RS.Universe(seed); App.sysCache = {}; App.persona = null; App.gM = RS.Music(RS.hash('galaxy', seed)); St.saveMeta(App.meta);
+-  const S = App.system(pk.sysI), body = pk.bk[0] === 'm' ? S.bodies[pk.bk[1]].moons[pk.bk[2]] : S.bodies[pk.bk[1]]; App.freshKey = App.surfKey(S, body);
++  const S = App.system(pk.sysI), body = pk.bk[0] === 'm' ? S.bodies[pk.bk[1]].moons[pk.bk[2]] : S.bodies[pk.bk[1]]; App.freshKey = App.surfKey(S, body); if (RS.Save && RS.Save.isChanged(App.freshKey)) App.freshKey = null;   /* v0.8 H: a launch that lands on a world you changed loads it instead of overwriting it */
+   const Sf = App.enterSurface(pk.sysI, body, pk.th || 1e-6); pk.scene = Sf.freshScene(App.cam.th, seed); pk.type = body.type; pk.key = App.freshKey; App.freshKey = null; /* only the launch itself skips loading */ App.launch = pk; return pk; };
+-App.start = () => { const fixed = /[?&]fixed=1/.test((G.location && G.location.search) || ''); if (fixed) { const S = App.system(0), home = S.bodies.find(b => b.home), ark = home.moons[0]; App.enterSurface(0, ark, 0); } else App.freshStart(); App.cam.z = 1; requestAnimationFrame(App.frame); };
++App.start = () => { if (RS.Save) { RS.Save.app = App; RS.Save.prof.stats.launches = (RS.Save.prof.stats.launches || 0) + 1; } const fixed = /[?&]fixed=1/.test((G.location && G.location.search) || ''); if (fixed) { const S = App.system(0), home = S.bodies.find(b => b.home), ark = home.moons[0]; App.enterSurface(0, ark, 0); } else App.freshStart(); App.cam.z = 1; requestAnimationFrame(App.frame); };
+ App.start();
+ })(window)).catch(e => { setTimeout(() => { throw e; }); });
+diff -ruN -x node_modules softsound_v08prep_base/www/js/persist.js softsound_v08prep/www/js/persist.js
+--- a/www/js/persist.js	1969-12-31 17:00:00.000000000 -0700
++++ b/www/js/persist.js	2026-10-23 04:15:57.723945924 -0600
+@@ -0,0 +1,202 @@
++'use strict';
++// v0.8 H (chunk 1): PERSISTENCE FOUNDATION. A fresh save system under new 'rs2:' keys (Wilbow 3:12: old rs1 saves are ignored, never migrated, never
++// deleted). Layout:  rs2:p = profile (lineage, guide hint progress, galaxies index, launch stats, other meta)  |  rs2:g:<useed> = one galaxy (orbit
++// nudges, aliveness, scalar world mods, seeds, index of CHANGED worlds)  |  rs2:w:<useed>:<sys>:<body> = one world header (sats, mods, mix, daw,
++// items, clay, grow, water, chunk list)  |  rs2:c:<useed>:<sys>:<body>:<ci> = one chunk of one world (bodies + ohms). Every record is
++// { v, t, k, comp: { id: { v, d } } } built by a VERSIONED COMPONENT REGISTRY (RS.Save.register): each component has a scope, a version, pack/unpack
++// and step-wise migrations; components this build does not know (or newer versions) are kept verbatim and written back untouched.
++// Saving is a DELTA by place: only touched chunks, and only when their packed text differs from the last write. A world that was never changed
++// stores nothing. Writes happen in idle time (2 s after the last edit, at most 30 s after the first pending one, and a 60 s drift pass while ohms
++// live there), one chunk per slice inside requestIdleCallback with a ~3 ms budget; hiding / leaving the app flushes synchronously.
++// O1: per-ohm counters (c.tally = { w: watched seconds ON SCREEN only, i: interactions (tap, catch, grab, play, DNA edit), o: offspring, t: teachers })
++// are saved as the 'tally' ohm component. No per-frame work is added off screen (one check per second, on-screen ohms only).
++(function (G) {
++const RS = G.RS, St = RS.Store; if (!St) return;
++St.prefix = 'rs2:';   // FRESH START: rs1 keys are never loaded (ready() only reads keys under the current prefix)
++const now = () => SV.now();   // scheduling clock (tests may fake it)
++const rt = () => (G.performance && G.performance.now ? G.performance.now() : Date.now());   // real clock, for slice budgets / timings
++const SV = RS.Save = { V: 1, comps: {}, order: {}, unk: {}, cur: null, cfg: { quiet: 2000, maxWait: 30000, drift: 60000, budget: 3, worldMax: 1000000, chunkMax: 200000 },
++  now: () => (G.performance && G.performance.now ? G.performance.now() : Date.now()),
++  stats: { writes: 0, skipped: 0, bytes: 0, slices: 0, sliceMs: [], flushMs: 0, errs: 0, newer: 0, worldBytes: {} } };
++// ---------------- keys ----------------
++SV.K = { p: () => 'rs2:p', g: u => 'rs2:g:' + u, w: (u, sys, bk) => 'rs2:w:' + u + ':' + sys + ':' + bk, c: (wk, ci) => 'rs2:c:' + wk.slice(6) + ':' + ci };
++SV.worldKey = (u, S, b, bodyKey) => SV.K.w(u, S.i, b.ark ? 'ark' : bodyKey(S, b));
++SV.parseW = k => { const p = String(k).split(':'); return p[0] === 'rs2' && p[1] === 'w' && p.length >= 5 ? { u: +p[2], sys: +p[3], bk: p.slice(4).join(':'), tail: p.slice(3).join(':') } : null; };
++// ---------------- registry ----------------
++SV.register = (id, spec) => { const s = Object.assign({ v: 1, migrate: {} }, spec, { id }); if (!s.scope || !s.pack || !s.unpack) throw new Error('Save.register ' + id + ': scope/pack/unpack needed');
++  const o = SV.order[s.scope] = (SV.order[s.scope] || []).filter(x => x !== id); o.push(id); SV.comps[id] = s; return s; };
++SV.packComps = (scope, ctx, keep) => { const comp = {}; for (const id of SV.order[scope] || []) { const s = SV.comps[id]; let d; try { d = s.pack(ctx); } catch (e) { SV.stats.errs++; SV.lastErr = id + ': ' + e; continue; } if (d !== undefined && d !== null) comp[id] = { v: s.v, d }; }
++  if (keep) for (const id in keep) comp[id] = keep[id];   // unknown / newer components ride along untouched
++  return comp; };
++SV.unpackComps = (scope, ctx, comp) => { comp = comp && typeof comp === 'object' ? comp : {}; const keep = {}; let nk = 0;
++  for (const id in comp) { const s = SV.comps[id]; if (!s || s.scope !== scope) { keep[id] = comp[id]; nk++; } else if (comp[id] && (comp[id].v || 1) > s.v) { keep[id] = comp[id]; nk++; SV.stats.newer++; } }
++  for (const id of SV.order[scope] || []) { const e = comp[id]; if (!e || keep[id]) continue; const s = SV.comps[id]; let d = e.d, v = e.v || 1, g = 0;
++    while (v < s.v && g++ < 64) { const m = s.migrate[v]; if (!m) break; d = m(d, ctx); v++; }
++    if (v !== s.v) { keep[id] = e; nk++; continue; }
++    try { s.unpack(ctx, d); } catch (er) { keep[id] = e; nk++; SV.stats.errs++; SV.lastErr = id + ': ' + er; } }
++  return nk ? keep : null; };
++// ---------------- raw records (never through Store.get: its rs1 migrations must not touch rs2 records) ----------------
++const parse = s => { try { const d = JSON.parse(s); return d && typeof d === 'object' ? d : null; } catch (e) { return null; } };
++SV.read = k => { for (const kk of [k, k + '.bak']) { const s = St.raw.get(kk); if (!s) continue; const d = parse(s); if (d && d.comp) return d; } return null; };
++SV.has = k => St.raw.get(k) != null;
++// body = record text without its time stamp (used to skip writes that change nothing); the stored text carries t first so Store.ready can pick the newest copy
++const body = (k, comp) => JSON.stringify({ v: SV.V, k, comp });
++// SV.last keeps a digest of the last body written per key (length + two 32-bit hashes), not the text: unchanged chunks are skipped without a second copy of every save in memory
++const dig = s => { let a = 0x811c9dc5, b = 5381; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); a = Math.imul(a ^ c, 16777619); b = (Math.imul(b, 33) + c) | 0; } return s.length + ':' + (a >>> 0).toString(36) + ':' + (b >>> 0).toString(36); };
++SV.dig = dig;
++const stampd = (b, t) => '{"t":' + t + ',' + b.slice(1);
++SV.last = {};   // key -> last written body
++SV.put = (list, t) => { const out = []; t = t || Date.now(); for (const [k, b] of list) { const d = dig(b); if (SV.last[k] === d) { SV.stats.skipped++; continue; } SV.last[k] = d; const s = stampd(b, t); out.push([k, s]); SV.stats.bytes += s.length; }
++  if (out.length) { St.putStrs(out); SV.stats.writes += out.length; } return out.length; };
++SV.del = k => { delete SV.last[k]; if (St.raw.get(k) != null) St.del(k); };
++// ================= PROFILE + GALAXY (App.meta is split across rs2:p and rs2:g:<useed>, joined again on load) =================
++SV.prof = { guide: null, gal: {}, stats: { launches: 0 } };   // profile-owned state
++SV.gw = {};    // useed -> { worldTail: [tMin, nOhms, alive] }  (index of changed worlds)
++const GUIDE_LOCAL = { id: 1, t: 1 };   // the guide ohm's id and its world-clock stamp stay with the world
++SV.register('lineage', { scope: 'profile', pack: c => c.meta.lineage || [], unpack: (c, d) => { c.meta.lineage = d; } });
++SV.register('guide', { scope: 'profile', pack: () => SV.prof.guide || undefined, unpack: (c, d) => { SV.prof.guide = d; } });
++SV.register('galaxies', { scope: 'profile', pack: () => SV.prof.gal, unpack: (c, d) => { SV.prof.gal = d || {}; } });
++SV.register('pstats', { scope: 'profile', pack: () => SV.prof.stats, unpack: (c, d) => { SV.prof.stats = d || { launches: 0 }; } });
++const META_SPLIT = { lineage: 1, alive: 1, orbit: 1, mods: 1, seeds: 1, t: 1, v: 1 };
++SV.register('meta', { scope: 'profile', pack: c => { const o = {}; for (const k in c.meta) if (!META_SPLIT[k]) o[k] = c.meta[k]; return o; }, unpack: (c, d) => { Object.assign(c.meta, d); } });
++const galOf = k => { const w = SV.parseW(k); return w ? w.u : null; };
++const scal = m => { const o = {}; for (const k in m || {}) { const v = m[k]; if (v == null || typeof v !== 'object') o[k] = v; } return o; };
++SV.register('orbit', { scope: 'galaxy', pack: c => c.meta.orbit && c.meta.orbit[c.u], unpack: (c, d) => { (c.meta.orbit = c.meta.orbit || {})[c.u] = d; } });
++SV.register('alive', { scope: 'galaxy', pack: c => { const o = {}, p = c.u + ':'; for (const k in c.meta.alive || {}) if (k.startsWith(p)) o[k.slice(p.length)] = c.meta.alive[k]; return o; }, unpack: (c, d) => { c.meta.alive = c.meta.alive || {}; for (const k in d) c.meta.alive[c.u + ':' + k] = d[k]; } });
++SV.register('wmods', { scope: 'galaxy', pack: c => { const o = {}; for (const k in c.meta.mods || {}) if (galOf(k) === c.u) o[SV.parseW(k).tail] = scal(c.meta.mods[k]); return o; },
++  unpack: (c, d) => { c.meta.mods = c.meta.mods || {}; for (const t in d) { const k = 'rs2:w:' + c.u + ':' + t; c.meta.mods[k] = Object.assign(c.meta.mods[k] || {}, d[t]); } } });
++SV.register('seeds', { scope: 'galaxy', pack: c => { const o = {}; for (const k in c.meta.seeds || {}) if (galOf(k) === c.u) o[k] = c.meta.seeds[k]; return o; }, unpack: (c, d) => { c.meta.seeds = Object.assign(c.meta.seeds || {}, d); } });
++SV.register('worlds', { scope: 'galaxy', pack: c => SV.gw[c.u] || {}, unpack: (c, d) => { SV.gw[c.u] = d || {}; } });
++const emptyMeta = () => ({ v: RS.SAVE_V, useed: 1, lineage: [], alive: {}, orbit: {}, mods: {}, seen: {}, t: Date.now() });
++SV.loadMeta = () => { const meta = emptyMeta(), pr = SV.read(SV.K.p()); SV.prof = { guide: null, gal: {}, stats: { launches: 0 } }; SV.gw = {};
++  if (pr) { SV.unk[SV.K.p()] = SV.unpackComps('profile', { meta }, pr.comp); SV.last[SV.K.p()] = dig(body(SV.K.p(), pr.comp)); }
++  const us = new Set(Object.keys(SV.prof.gal).map(Number)); us.add(+meta.useed);
++  for (const u of us) { const k = SV.K.g(u), r = SV.read(k); if (!r) continue; SV.unk[k] = SV.unpackComps('galaxy', { meta, u }, r.comp); SV.last[k] = dig(body(k, r.comp)); }
++  return meta; };
++SV.saveMeta = meta => { meta.t = Date.now(); const us = new Set(); const add = u => { if (u != null && isFinite(u)) us.add(+u); };
++  for (const k in meta.mods || {}) add(galOf(k)); for (const k in meta.seeds || {}) add(galOf(k)); for (const u in meta.orbit || {}) add(u); for (const u in SV.gw) add(u); for (const u in SV.prof.gal) add(u);
++  const list = [];
++  for (const u of us) { const ctx = { meta, u }, comp = SV.packComps('galaxy', ctx, SV.unk[SV.K.g(u)]); const nW = Object.keys(comp.worlds ? comp.worlds.d : {}).length, nO = comp.orbit ? 1 : 0, nS = Object.keys(comp.seeds ? comp.seeds.d : {}).length;
++    if (!nW && !nO && !nS && !SV.prof.gal[u]) continue;   // a galaxy where nothing was changed is not recorded
++    SV.prof.gal[u] = [Math.floor(Date.now() / 60000), nW]; list.push([SV.K.g(u), body(SV.K.g(u), comp)]); }
++  const pk = SV.K.p(); list.push([pk, body(pk, SV.packComps('profile', { meta }, SV.unk[pk]))]);
++  return SV.put(list, meta.t) >= 0; };
++// ---- the old Store API keeps working for app.js: meta() / saveMeta() / surfKey() now speak rs2
++St.meta = () => SV.loadMeta();
++St.saveMeta = m => SV.saveMeta(m);
++St.surfKey = (u, sys, bk) => SV.K.w(u, sys, bk);
++// ---- reachability: every changed world is listed in its galaxy's record, every such galaxy in the profile
++SV.changedWorlds = () => { const out = []; for (const u in SV.gw) for (const t in SV.gw[u]) out.push({ u: +u, key: 'rs2:w:' + u + ':' + t, tail: t, info: SV.gw[u][t] }); return out; };
++SV.galaxies = () => Object.keys(SV.prof.gal).map(Number).filter(u => SV.gw[u] && Object.keys(SV.gw[u]).length);
++SV.isChanged = k => { const w = SV.parseW(k); return !!(w && SV.gw[w.u] && SV.gw[w.u][w.tail]); };
++// ================= WORLD: header + chunk components =================
++const HDR = ['sats', 'mods', 'mix', 'daw', 'items', 'clay', 'grow', 'water'];
++for (const f of HDR) SV.register(f, { scope: 'world', pack: c => c.h[f], unpack: (c, d) => { c.h[f] = d; } });
++SV.register('world', { scope: 'world', pack: c => ({ started: c.h.started, alive: c.h.alive, n: c.h.n, cis: c.cis }), unpack: (c, d) => { c.h.started = d.started; c.h.alive = d.alive; c.h.n = d.n; c.cis = d.cis || []; } });
++// header fields a later build adds to Sf.packHeader() without registering them still persist (verbatim)
++SV.register('hx', { scope: 'world', pack: c => { const o = {}; let n = 0; for (const k in c.h) if (!(k in HX_KNOWN)) { o[k] = c.h[k]; n++; } return n ? o : undefined; }, unpack: (c, d) => { Object.assign(c.h, d); } });
++const HX_KNOWN = { v: 1, t: 1, chunks: 1, started: 1, alive: 1, n: 1 }; for (const f of HDR) HX_KNOWN[f] = 1;
++SV.register('bodies', { scope: 'chunk', pack: c => c.d.b || [], unpack: (c, d) => { c.d.b = d || []; } });
++SV.register('ohms', { scope: 'chunk', pack: c => c.d.c || [], unpack: (c, d) => { c.d.c = d || []; } });
++SV.register('cx', { scope: 'chunk', pack: c => { const o = {}; let n = 0; for (const k in c.d) if (k !== 'b' && k !== 'c' && k !== 'saved' && k !== 't') { o[k] = c.d[k]; n++; } return n ? o : undefined; }, unpack: (c, d) => { Object.assign(c.d, d); } });
++// ---- ohm-scope components live inside each saved ohm as s.cp (hooked from Sf.serialCreature / Sf.loadCreature)
++SV.ohmOut = (c, s) => { const cp = SV.packComps('ohm', c, c._cpKeep); for (const k in cp) { s.cp = cp; break; } return s; };
++SV.ohmIn = (c, s) => { if (s && s.cp) c._cpKeep = SV.unpackComps('ohm', c, s.cp) || undefined; return c; };
++SV.tally = c => c.tally || (c.tally = { w: 0, i: 0, o: 0, t: [] });
++SV.register('tally', { scope: 'ohm', pack: c => { const t = c.tally; if (!t || !(t.w || t.i || t.o || (t.t && t.t.length))) return undefined; const a = [Math.round(t.w), t.i, t.o]; if (t.t && t.t.length) a.push(t.t); return a; },
++  unpack: (c, d) => { c.tally = { w: +d[0] || 0, i: +d[1] || 0, o: +d[2] || 0, t: Array.isArray(d[3]) ? d[3].slice(0, 2) : [] }; } });
++// ---------------- load one world (only when it is entered; other worlds are never parsed) ----------------
++SV.loadWorld = k => { const r = SV.read(k); if (!r) return null; const ctx = { h: {}, cis: [] }; const keepH = SV.unpackComps('world', ctx, r.comp); const chunks = {}, keepC = {}, seen = {}; let bad = 0;
++  for (const ci of ctx.cis) { const ck = SV.K.c(k, ci), cr = SV.read(ck); if (!cr) { bad++; continue; } const d = { saved: true, t: cr.t || r.t, b: [], c: [] }, kc = SV.unpackComps('chunk', { d }, cr.comp); if (kc) keepC[ci] = kc;
++    // safety net: an ohm caught mid-move between two chunk writes appears once (newest chunk wins)
++    d.c = d.c.filter(s => { const o = seen[s.id]; if (!o) { seen[s.id] = { d, s }; return true; } if ((o.d.t || 0) >= d.t) return false; o.d.c = o.d.c.filter(q => q !== o.s); seen[s.id] = { d, s }; return true; });
++    chunks[ci] = d; SV.last[ck] = dig(body(ck, cr.comp)); }
++  SV.last[k] = dig(body(k, r.comp)); SV._loaded = { k, keepH, keepC, cis: ctx.cis.slice(), bad };
++  return Object.assign({ v: RS.SAVE_V, t: r.t || Date.now(), chunks }, ctx.h); };
++// ================= the idle saver =================
++const ckOf = (Sf, x, y) => Sf.chunkKey(Sf.P.chunkOf(Sf.P.theta(x, y)));
++SV.attach = (Sf, k, loaded) => { const L = SV._loaded && SV._loaded.k === k ? SV._loaded : null; SV._loaded = null;
++  const st = Sf._sv = { key: k, changed: !!loaded, pend: new Set(), first: 0, last: 0, q: null, sched: 0, lastDrift: now(), full: true, keepH: L ? L.keepH : null, keepC: L ? L.keepC : {}, cis: new Set(L ? L.cis : []), ohmCis: new Set(), fp: null, fpT: 0, sizes: {} };
++  if (L) for (const ci of L.cis) { const s = SV.last[SV.K.c(k, ci)]; if (s) st.sizes[ci] = parseInt(s, 10); }
++  // the guide's hint progress belongs to the player, not the world: profile wins
++  if (SV.prof.guide) Sf.mods.guide = Object.assign(Sf.mods.guide || { step: 0, done: false, id: null }, SV.prof.guide);
++  st.fp = SV.fingerprint(Sf); SV.cur = Sf; SV.stats.attached = k; return st; };
++// DAW / mix edits have no Surface verb, so they are noticed by comparing this small text every 2 s (of the world mods only the player-made music tempo / key and user glyphs: the world fills in nests / dust / farm / fieldD / regionBpm itself)
++SV.fingerprint = Sf => { const m = Sf.mods || {}; try { return JSON.stringify([Sf.dawEdits || {}, Sf.mix || {}, m.music || null, m.glyphUser || null]); } catch (e) { return ''; } };
++SV.guideOut = Sf => { const g = Sf.mods && Sf.mods.guide; if (!g) return; const o = {}; for (const k in g) if (!GUIDE_LOCAL[k]) o[k] = g[k]; SV.prof.guide = o; };
++// mark a player change (world becomes worth storing) at a place (chunk id) or for the header only
++SV.mark = (Sf, ci, notChange) => { const st = Sf && Sf._sv; if (!st) return; if (!notChange) st.changed = true; if (!st.changed) return; if (ci != null && isFinite(ci)) st.pend.add(ci); const n = now(); if (!st.first) st.first = n; st.last = n; };
++SV.markAt = (Sf, x, y, notChange) => SV.mark(Sf, (typeof x === 'number' && typeof y === 'number') ? ckOf(Sf, x, y) : null, notChange);
++// chunks that hold live ohms now (bounded by the ohm count; no per-frame cost: only when a cycle starts)
++const ohmChunks = Sf => { const s = new Set(); for (const c of Sf.creatures) if (!c.dead && !c.caught) s.add(ckOf(Sf, c.x, c.y)); return s; };
++SV.startCycle = (Sf, why) => { const st = Sf._sv; const ids = new Set(Sf.chunkIds()), q = [];
++  const want = st.full ? new Set(ids) : new Set([...st.pend, ...ohmChunks(Sf), ...st.ohmCis]); st.full = false; st.pend.clear(); st.first = 0; st.lastDrift = now();
++  for (const ci of want) q.push(ci); q.push('hdr'); st.q = q; st.ids = ids; st.why = why; return q; };
++SV.chunkRec = (Sf, ci) => { const st = Sf._sv, d = Sf.chunkLive(ci); if (!d) return null; const ck = SV.K.c(st.key, ci); return [ck, body(ck, SV.packComps('chunk', { Sf, d, ci }, st.keepC[ci]))]; };
++SV.task = (Sf, t, list) => { const st = Sf._sv;
++  if (t === 'hdr') return SV.hdrTask(Sf, list);
++  if (!st.ids.has(t)) { if (st.cis.has(t)) { st.cis.delete(t); SV.del(SV.K.c(st.key, t)); } st.ohmCis.delete(t); return; }
++  const r = SV.chunkRec(Sf, t); if (!r) return; const total = Object.values(st.sizes).reduce((a, b) => a + b, 0) - (st.sizes[t] || 0);
++  const d = Sf.chunkLive(t), hasOhm = d && d.c && d.c.length; if (hasOhm) st.ohmCis.add(t); else st.ohmCis.delete(t);
++  if (r[1].length > SV.cfg.chunkMax || (total + r[1].length > SV.cfg.worldMax && !hasOhm && !Sf.dirty.has(t))) { SV.stats.overBudget = (SV.stats.overBudget || 0) + 1; return; }   // natural terrain regenerates; never drop ohms or touched places
++  st.sizes[t] = r[1].length; st.cis.add(t); if (list) list.push(r); else SV.put([r]); };
++SV.hdrTask = (Sf, list) => { const st = Sf._sv, k = st.key, h = Sf.packHeader(); SV.guideOut(Sf);
++  for (const ci of [...st.cis]) if (!st.ids.has(ci)) { st.cis.delete(ci); delete st.sizes[ci]; SV.del(SV.K.c(k, ci)); }
++  const cis = [...st.cis].sort((a, b) => a - b), comp = SV.packComps('world', { Sf, h, cis }, st.keepH), r = [k, body(k, comp)];
++  if (list) list.push(r); else SV.put([r]); st.sizes.hdr = r[1].length; const w = SV.parseW(k);
++  if (w) { const gw = SV.gw[w.u] = SV.gw[w.u] || {}; gw[w.tail] = [Math.floor(Date.now() / 60000), h.n || 0, h.alive || 0]; }
++  SV.stats.worldBytes[k] = Object.values(st.sizes).reduce((a, b) => a + b, 0); st.fp = SV.fingerprint(Sf); };
++// one idle slice: at least one task, then more while under budget
++SV.slice = (Sf, budget) => { const st = Sf && Sf._sv; if (!st || !st.q) return 0; const t0 = rt(), b = budget == null ? SV.cfg.budget : budget; let n = 0;
++  while (st.q.length) { const t = st.q.shift(); SV.task(Sf, t); n++; if (t === 'hdr' && SV.app && SV.app.Sf === Sf && SV.app.save) { try { SV.app.save(true); } catch (e) { SV.stats.errs++; } } if (rt() - t0 >= b * .5) break; }
++  if (!st.q.length) { st.q = null; SV.stats.cycles = (SV.stats.cycles || 0) + 1; }
++  const ms = rt() - t0; SV.stats.slices++; const a = SV.stats.sliceMs; a.push(ms); if (a.length > 400) a.shift(); return ms; };
++SV.drain = Sf => { let g = 0; while (Sf._sv && Sf._sv.q && g++ < 10000) SV.slice(Sf, Infinity); };
++// per frame: a few comparisons; heavy work only in idle callbacks
++SV.pump = (Sf, tNow) => { const st = Sf && Sf._sv; if (!st) return; const n = tNow == null ? now() : tNow;
++  if (n - st.fpT > 2000) { st.fpT = n; const fp = SV.fingerprint(Sf); if (fp !== st.fp) { st.fp = fp; SV.mark(Sf, null); } }   // DAW / mix / tempo-key / user-glyph edits
++  if (!st.changed) return;
++  if (!st.q && ((st.first && (n - st.last >= SV.cfg.quiet || n - st.first >= SV.cfg.maxWait)) || n - st.lastDrift >= SV.cfg.drift)) SV.startCycle(Sf, st.first ? 'edit' : 'drift');
++  if (st.q && !st.sched) { st.sched = 1; const run = dl => { st.sched = 0; if (SV.cur !== Sf || !st.q) return; const left = dl && dl.timeRemaining ? dl.timeRemaining() : SV.cfg.budget; SV.slice(Sf, Math.min(SV.cfg.budget, Math.max(1, left))); };
++    if (G.requestIdleCallback) G.requestIdleCallback(run, { timeout: 1000 }); else setTimeout(run, 0); } };
++// synchronous flush (hide / leave / pagehide / App.save): everything pending in one Store transaction
++SV.flush = Sf => { const st = Sf && Sf._sv; if (!st) return 0; const t0 = rt(); if (!st.changed) { const fp = SV.fingerprint(Sf); if (fp !== st.fp) st.changed = true; else return 0; }
++  const q = st.q ? st.q.filter(t => t !== 'hdr') : []; SV.startCycle(Sf, 'flush'); for (const t of q) if (!st.q.includes(t)) st.q.unshift(t);
++  const list = []; for (const t of st.q) SV.task(Sf, t, list); st.q = null; const n = SV.put(list); SV.stats.flushMs = rt() - t0; SV.stats.flushN = list.length; return n; };
++// size of everything stored under rs2 (for the soak test and the stats overlay)
++SV.size = () => { let n = 0; for (const k in St.mem) if (k.startsWith('rs2:') && !k.endsWith('.bak')) n += St.mem[k].length; return n; };
++// ================= hooks into each Surface (verbs, tally, step) =================
++const VERBS = ['hold', 'grabStart', 'grabMove', 'grabEnd', 'squeeze', 'stroke', 'catch'];
++const bump = (c, f) => { if (c && !c.dead) SV.tally(c)[f]++; };
++SV.hookSurface = Sf => { if (!Sf || Sf._svHooked) return Sf; Sf._svHooked = true; let gx = null, gy = null, inVerb = 0;
++  const tc0 = Sf.touchChunk; if (tc0) Sf.touchChunk = (ci, ...a) => { const r = tc0(ci, ...a); SV.mark(Sf, Sf.chunkKey(ci), !inVerb); return r; };
++  const tp0 = Sf.tap; if (tp0) Sf.tap = (x, y, s) => { const h = Sf.hit ? Sf.hit(x, y) : {}; inVerb++; let r; try { r = tp0(x, y, s); } finally { inVerb--; }
++    let c = null; if (r === 'chirp' && h.creature) c = h.creature; else if (r === 'pop' && h.bubble && h.bubble.meta) c = h.bubble.meta.c; if (c) { bump(c, 'i'); SV.markAt(Sf, c.x, c.y); } else if (r && r !== 'chirp') SV.markAt(Sf, x, y);
++    return r; };
++  for (const v of VERBS) { const f0 = Sf[v]; if (!f0) continue;
++    Sf[v] = (...a) => { let pre = null; if (v === 'grabStart') { const h = Sf.hit ? Sf.hit(a[0], a[1]) : {}; pre = h.creature || (h.bubble && h.bubble.meta && h.bubble.meta.c) || null; }
++      inVerb++; let r; try { r = f0(...a); } finally { inVerb--; } if (v === 'grabMove') { gx = a[0]; gy = a[1]; return r; }
++      if (!r) return r; let x = a[0], y = a[1];
++      if (v === 'catch' && a[0]) { x = a[0].x; y = a[0].y; bump(a[0], 'i'); } else if (v === 'stroke' && Array.isArray(a[0])) { const p = a[0][a[0].length >> 1] || []; x = p[0]; y = p[1]; } else if (v === 'grabEnd' || v === 'squeeze') { x = gx; y = gy; }
++      if (v === 'grabStart') { gx = x; gy = y; if (pre) bump(pre, 'i'); return r; }   // the move itself is stored when it ends
++      SV.markAt(Sf, x, y); return r; }; }
++  const ht0 = Sf.hatch; if (ht0) Sf.hatch = (e, ...a) => { const par = e && e.meta && e.meta.child && e.meta.child.parents; const r = ht0(e, ...a); if (par) for (const id of par) bump(Sf.creatures.find(c => c.id === id), 'o'); return r; };
++  // watched seconds: once per second of sim time, only ohms on screen (c.lod 0 is the existing per-frame visibility cull)
++  const sp0 = Sf.step; let acc = 0; if (sp0) Sf.step = (dt, ...a) => { const r = sp0(dt, ...a); acc += dt || 0; if (acc >= 1) { const k = Math.floor(acc); acc -= k; for (const c of Sf.creatures) if (c.lod === 0 && !c.dead && !c.caught && (!Sf.inView || Sf.inView(c.x, c.y, 40))) SV.tally(c).w += k; } return r; };
++  const dc0 = Sf.deactivate; if (dc0) Sf.deactivate = ci => { const was = Sf.active.has(ci); const r = dc0(ci); if (was && Sf._sv && Sf._sv.changed) Sf._sv.pend.add(ci); return r; };
++  return Sf; };
++// wrappers keep the original in ._raw so a second load of this file (tests) wraps the original, not the previous wrapper
++const raw0 = (o, k) => o && o[k] ? (o[k]._raw || o[k]) : null;
++const mk0 = raw0(RS, 'Surface'); if (mk0) { RS.Surface = function (...a) { return SV.hookSurface(mk0.apply(this, a)); }; Object.assign(RS.Surface, mk0); RS.Surface._raw = mk0; }
++// teaching (b learns from a), playing an ohm, editing its DNA
++if (RS.Creature && RS.Creature.teach) { const t0 = raw0(RS.Creature, 'teach'); RS.Creature.teach = (Sf, a, b, ...x) => { const r = t0(Sf, a, b, ...x); if (a && b && a.id && b !== a) { const t = SV.tally(b).t; if (!t.includes(a.id)) { t.push(a.id); if (t.length > 2) t.shift(); } } return r; }; RS.Creature.teach._raw = t0; }
++if (RS.Play && RS.Play.note) { const n0 = raw0(RS.Play, 'note'); RS.Play.note = (Sf, s, ...x) => { const r = n0(Sf, s, ...x); const c = s && s.c; if (c) { const tn = now(); if (!c._tn || tn - c._tn > 1500) { bump(c, 'i'); SV.markAt(Sf, c.x, c.y); } c._tn = tn; } return r; }; RS.Play.note._raw = n0; }
++if (RS.EnvEdit && RS.EnvEdit.note) { const e0 = raw0(RS.EnvEdit, 'note'); RS.EnvEdit.note = (Sf, c, ...x) => { const r = e0(Sf, c, ...x); if (c && c.x != null) { bump(c, 'i'); SV.markAt(Sf, c.x, c.y); } return r; }; RS.EnvEdit.note._raw = e0; }
++SV.hookDNA = () => { if (!RS.DNA) return; const d0 = raw0(RS, 'DNA'); RS.DNA = function (Sf, c, ...x) { const V = d0.call(this, Sf, c, ...x); if (V && V.commit) { const cm = V.commit; V.commit = (...y) => { const ed = V.edited; const r = cm(...y); if (ed && c) { bump(c, 'i'); SV.markAt(Sf, c.x, c.y); } return r; }; } return V; }; Object.assign(RS.DNA, d0); RS.DNA._raw = d0; };
++SV.hookDNA();
++// v0.8 H: on hide / pagehide only the dirty header + chunks are flushed (small, synchronous); replaces the old 10 s whole-world save
++SV.hide = () => { const A = SV.app; if (!A || !A.Sf || !A.save) return; const t0 = rt(); try { A.save(); } catch (e) { SV.stats.errs++; } SV.stats.hideMs = rt() - t0; SV.stats.hides = (SV.stats.hides || 0) + 1; };
++if (G.document && G.addEventListener && !G.__rsSaveHide) { G.__rsSaveHide = 1; G.document.addEventListener('visibilitychange', () => { if (G.document.visibilityState === 'hidden') RS.Save.hide(); }); G.addEventListener('pagehide', () => RS.Save.hide()); }
++// ask the browser to keep our storage (best effort)
++try { if (G.navigator && G.navigator.storage && G.navigator.storage.persist) G.navigator.storage.persist().then(p => { SV.stats.persisted = p; }, () => { }); if (G.navigator && G.navigator.storage && G.navigator.storage.estimate) G.navigator.storage.estimate().then(e => { SV.stats.estimate = { usage: e.usage, quota: e.quota }; }, () => { }); } catch (e) { }
++})(typeof window !== 'undefined' ? window : globalThis);
+diff -ruN -x node_modules softsound_v08prep_base/www/js/store.js softsound_v08prep/www/js/store.js
+--- a/www/js/store.js	2026-10-22 23:41:38.000000000 -0600
++++ b/www/js/store.js	2026-10-23 03:58:17.082225617 -0600
+@@ -41,6 +41,10 @@
+   set: (k, obj) => { obj.v = obj.v || RS.SAVE_V; obj.t = obj.t || Date.now(); let s = JSON.stringify(obj); if (s.length > S.cap) { obj.trimmed = true; if (obj.chunks) { const ks = Object.keys(obj.chunks); while (s.length > S.cap && ks.length) { delete obj.chunks[ks.shift()]; s = JSON.stringify(obj); } } }
+     const prev = mem[k]; if (prev && stamp(prev) >= 0) mem[k + '.bak'] = prev; mem[k] = s; IDB.write(prev ? [k, k + '.bak'] : [k]); lsSet(k, s); if (prev) lsSet(k + '.bak', s.length > S.lsMax / 2 ? null : prev);
+     S.writes++; S.bytes = s.length; return true; },
++  /* v0.8 H: several ready-made records (pre-stringified by RS.Save) + their previous copies (.bak) in ONE IndexedDB transaction. Chunk records
++     (rs2:c:) stay out of the small localStorage mirror; headers / profile / galaxy records are mirrored (no .bak in the mirror). */
++  putStrs: list => { const ks = []; for (const [k, s] of list) { const prev = mem[k]; if (prev && prev !== s) { mem[k + '.bak'] = prev; ks.push(k + '.bak'); } mem[k] = s; ks.push(k); if (!S.lsSkip(k)) lsSet(k, s); S.bytes = s.length; } IDB.write(ks); S.writes += list.length; return true; },
++  lsSkip: k => IDB.ok && k.startsWith('rs2:c:'),   // without a working IndexedDB the mirror is all there is, so chunks go there too
+   del: k => { delete mem[k]; delete mem[k + '.bak']; IDB.write([k, k + '.bak']); lsSet(k, null); lsSet(k + '.bak', null); },
+   // meta: the player's universe (seed, home, ark lineage, aliveness, orbit nudges, world-shaping mods)
+   meta: () => S.get(S.key('meta')) || { v: RS.SAVE_V, useed: 1, lineage: [], alive: {}, orbit: {}, mods: {}, seen: {}, t: Date.now() },
+diff -ruN -x node_modules softsound_v08prep_base/www/js/surface.js softsound_v08prep/www/js/surface.js
+--- a/www/js/surface.js	2026-10-23 03:25:22.000000000 -0600
++++ b/www/js/surface.js	2026-10-23 03:58:07.966248973 -0600
+@@ -313,8 +313,8 @@
+     else { b = W.makeRod(sb.pts, sb.thick || 4, Object.assign({}, mat, { bendK: (mat.bend || .3) / RS.clamp(((sb.thick || 4) - 3) / 14, .02, 1) })); if (b) tag(b, sb.role); }
+     if (!b) return null; b.uid = sb.uid; b.tension = sb.tension || 1; b.free = sb.free; if (sb.wl) b.meta.wl = sb.wl; if (sb.kit) b.meta.kit = true; if (sb.drum) b.meta.drum = true; if (sb.owner) b.meta.owner = sb.owner; if (sb.lm) b.meta.landmark = sb.lm; for (const k of sb.pins || []) if (b.idx[k] != null) W.pin(b.idx[k]);
+     if (sb.child) { b.meta.child = Object.assign({}, sb.child, { g: RS.Genome.fromCode(sb.child.code) }); b.meta.hatch = Sf.now() + 4; Sf.eggs.push(b); } return b; };
+-  Sf.serialCreature = c => { const s = C.serial(c); s.cluster = c.cluster ? c.cluster.id : null; s.style = c.style || null; s.learned = c.learn.map(l => l.from); s.nest = c.nest; s.home = c.home ? c.home.uid : null; s.loop = c.loop; if (c.anchor) s.anchor = [Math.round(c.anchor[0]), Math.round(c.anchor[1])]; if (c.home0) s.home0 = [Math.round(c.home0[0]), Math.round(c.home0[1])]; if (c.visitor) s.visitor = c.visitor; if (c.voyaged) s.voyaged = c.voyaged; if (c.settler) s.settler = 1; if (c.home00) { s.home00 = [Math.round(c.home00[0]), Math.round(c.home00[1])]; s.homeWhy = c.homeWhy || null; } return s; };   /* v0.5b (B): home is saved with the ohm, so a chunk unload / reload never moves it */
+-  Sf.loadCreature = s => { const c = Sf.addCreature((q => { if (s.shaped) q.shaped = 1; return q; })(RS.Genome.fromCode(s.code)), s.x, s.y, { id: s.id, growth: s.growth, energy: s.energy, keyC: s.keyC, tempo: s.tempo, regOff: s.regOff, phase: s.phase, born: s.born, parents: s.parents, gen: s.gen, quiet: true }); c.motif = s.motif || c.motif; if (s.mdur) c.mdur = s.mdur; for (const k of ['mvel', 'mlen', 'mchord', 'loopLen', 'freeCents']) if (s[k]) c[k] = s[k]; c.scored = !!s.scored; c.muted = !!s.muted; c.scoreV = 1; if (s.editedGenes) { c.editedGenes = s.editedGenes; c.edited = true; } for (const k of ['stutter', 'grit', 'wxMem', 'pollen', 'motifSrc', 'motifFit', 'voice', 'code0', 'taughtMotif', 'guide', 'bond', 'rel', 'tapCell', 'eggVoice', 'glyphs', 'eggBpm', 'eggTier', 'parentId', 'copied', 'shaped', 'sym', 'colourC', 'visitor', 'voyaged', 'settler', 'home00', 'homeWhy', 'exp']) if (s[k] != null) c[k] = s[k]; if (s.inhP && !c.exp) c._inhP = s.inhP;   /* v0.7: a parent snapshot still waiting for the hatchling's mind */ if (c.colourC && c.mind) c.mind.colourC = c.colourC;   /* v0.5c: the #4 borrowed colour is live again after a load */ if (RS.Items) RS.Items.attachPending(Sf, c); if (s.learnedSys != null) c.learnedSys = s.learnedSys; if (s.learnedMeter) c.learnedMeter = s.learnedMeter; if (s.mindTonic != null) c.mindTonic = s.mindTonic; c.age = s.age || 0; c.natural = s.natural; c.style = s.style; c.nest = s.nest; c._cl = s.cluster; c._home = s.home; c.loop = s.loop; if (s.epi) c.epi = s.epi; if (s.epiPhase != null) c.epiPhase = s.epiPhase; if (s.loopG0 != null) c.loopG0 = s.loopG0; if (s.synced) c.synced = s.synced; if (s.words) c.words = s.words.map(w => Object.assign({ echoed: true }, w)); if (s.anchor) c.anchor = s.anchor.slice(); if (s.home0) c.home0 = s.home0.slice(); Sf.settleLoaded(c, s.x, s.y); return c; };
++  Sf.serialCreature = c => { const s = C.serial(c); s.cluster = c.cluster ? c.cluster.id : null; s.style = c.style || null; s.learned = c.learn.map(l => l.from); s.nest = c.nest; s.home = c.home ? c.home.uid : null; s.loop = c.loop; if (c.anchor) s.anchor = [Math.round(c.anchor[0]), Math.round(c.anchor[1])]; if (c.home0) s.home0 = [Math.round(c.home0[0]), Math.round(c.home0[1])]; if (c.visitor) s.visitor = c.visitor; if (c.voyaged) s.voyaged = c.voyaged; if (c.settler) s.settler = 1; if (c.home00) { s.home00 = [Math.round(c.home00[0]), Math.round(c.home00[1])]; s.homeWhy = c.homeWhy || null; } if (RS.Save) RS.Save.ohmOut(c, s);   /* v0.8 H: ohm-scope save components (O1 tally) */ return s; };   /* v0.5b (B): home is saved with the ohm, so a chunk unload / reload never moves it */
++  Sf.loadCreature = s => { const c = Sf.addCreature((q => { if (s.shaped) q.shaped = 1; return q; })(RS.Genome.fromCode(s.code)), s.x, s.y, { id: s.id, growth: s.growth, energy: s.energy, keyC: s.keyC, tempo: s.tempo, regOff: s.regOff, phase: s.phase, born: s.born, parents: s.parents, gen: s.gen, quiet: true }); c.motif = s.motif || c.motif; if (s.mdur) c.mdur = s.mdur; for (const k of ['mvel', 'mlen', 'mchord', 'loopLen', 'freeCents']) if (s[k]) c[k] = s[k]; c.scored = !!s.scored; c.muted = !!s.muted; c.scoreV = 1; if (s.editedGenes) { c.editedGenes = s.editedGenes; c.edited = true; } for (const k of ['stutter', 'grit', 'wxMem', 'pollen', 'motifSrc', 'motifFit', 'voice', 'code0', 'taughtMotif', 'guide', 'bond', 'rel', 'tapCell', 'eggVoice', 'glyphs', 'eggBpm', 'eggTier', 'parentId', 'copied', 'shaped', 'sym', 'colourC', 'visitor', 'voyaged', 'settler', 'home00', 'homeWhy', 'exp']) if (s[k] != null) c[k] = s[k]; if (s.inhP && !c.exp) c._inhP = s.inhP;   /* v0.7: a parent snapshot still waiting for the hatchling's mind */ if (c.colourC && c.mind) c.mind.colourC = c.colourC;   /* v0.5c: the #4 borrowed colour is live again after a load */ if (RS.Items) RS.Items.attachPending(Sf, c); if (s.learnedSys != null) c.learnedSys = s.learnedSys; if (s.learnedMeter) c.learnedMeter = s.learnedMeter; if (s.mindTonic != null) c.mindTonic = s.mindTonic; c.age = s.age || 0; c.natural = s.natural; c.style = s.style; c.nest = s.nest; c._cl = s.cluster; c._home = s.home; c.loop = s.loop; if (s.epi) c.epi = s.epi; if (s.epiPhase != null) c.epiPhase = s.epiPhase; if (s.loopG0 != null) c.loopG0 = s.loopG0; if (s.synced) c.synced = s.synced; if (s.words) c.words = s.words.map(w => Object.assign({ echoed: true }, w)); if (s.anchor) c.anchor = s.anchor.slice(); if (s.home0) c.home0 = s.home0.slice(); if (RS.Save) RS.Save.ohmIn(c, s);   /* v0.8 H */ Sf.settleLoaded(c, s.x, s.y); return c; };
+   /* v0.5b (B): a reloaded ohm is rebuilt in its rest shape; lift it clear of the ground (a body rebuilt partly underground was shoved out at 200-300 px/s),
+      zero its velocity and let it resume calmly (held soft for a second) */
+   Sf.BUDGET = { area: 700 };   /* v0.5b (A): automatic spawns (coral) are refused where an area already holds this many particles */
+@@ -542,9 +542,13 @@
+     const cChunks = new Set(Sf.creatures.filter(c => !c.dead && !c.caught).map(c => Sf.chunkKey(P.chunkOf(P.theta(c.x, c.y)))));
+     for (const ci of cChunks) if (!Sf.active.has(ci)) { const d0 = Sf.chunks[ci], live = Sf.creatures.filter(c => !c.dead && !c.caught && Sf.chunkKey(P.chunkOf(P.theta(c.x, c.y))) === ci); chunks[ci] = Object.assign({ b: [] }, d0 || {}, { saved: true, t: Date.now(), c: ((d0 && d0.c) || []).filter(q => !live.some(c => c.id === q.id)).concat(live.map(Sf.serialCreature)) }); }
+     for (const ci of Sf.active) { if (cChunks.has(ci) || Sf.dirty.has(ci) || Sf.creatures.some(c => Sf.chunkKey(P.chunkOf(P.theta(c.x, c.y))) === ci) || (Sf.chunks[ci] && Sf.chunks[ci].saved)) chunks[ci] = Sf.packChunk(ci, false); }
+-    const out = { v: RS.SAVE_V, t: Date.now(), sats: Sf.orbit ? Sf.orbit.pack() : [], mods: Sf.mods, mix: Sf.mix || {}, daw: Sf.dawEdits || {}, items: RS.Items ? RS.Items.pack(Sf) : null, clay: RS.Mold ? RS.Mold.pack(Sf) : null, grow: RS.Grow ? RS.Grow.pack(Sf) : null, water: RS.Water && Sf.water ? RS.Water.pack(Sf) : null, started: !!Sf.chunks.started, chunks, alive: +Sf.aliveness().toFixed(3), n: Sf.creatures.length };
++    const out = Sf.packHeader(); out.chunks = chunks;   /* v0.8 H: header fields moved to Sf.packHeader (shared with the chunked saver) */
+     // size budget: drop untouched chunks first, then cap bodies
+     let s = JSON.stringify(out); if (s.length > 180000) { for (const ci in out.chunks) { const d = out.chunks[ci]; if (!d.c.length && !Sf.dirty.has(+ci)) delete out.chunks[ci]; } s = JSON.stringify(out); } Sf.saveSize = s.length; return out; };
++  /* v0.8 H: the same save split by place, for RS.Save (persist.js): the world header, the list of chunks Sf.pack would include, and one chunk's live data */
++  Sf.packHeader = () => ({ v: RS.SAVE_V, t: Date.now(), sats: Sf.orbit ? Sf.orbit.pack() : [], mods: Sf.mods, mix: Sf.mix || {}, daw: Sf.dawEdits || {}, items: RS.Items ? RS.Items.pack(Sf) : null, clay: RS.Mold ? RS.Mold.pack(Sf) : null, grow: RS.Grow ? RS.Grow.pack(Sf) : null, water: RS.Water && Sf.water ? RS.Water.pack(Sf) : null, started: !!Sf.chunks.started, alive: +Sf.aliveness().toFixed(3), n: Sf.creatures.length });
++  Sf.chunkIds = () => { const ids = new Set(), any = new Set(); for (const ci in Sf.chunks) if (Sf.chunks[ci] && Sf.chunks[ci].saved) ids.add(+ci); for (const c of Sf.creatures) { const ci = Sf.chunkKey(P.chunkOf(P.theta(c.x, c.y))); any.add(ci); if (!c.dead && !c.caught) ids.add(ci); } for (const ci of Sf.active) if (Sf.dirty.has(ci) || any.has(ci)) ids.add(ci); return [...ids]; };
++  Sf.chunkLive = ci => { if (Sf.active.has(ci)) return Sf.packChunk(ci, false); const d0 = Sf.chunks[ci], live = Sf.creatures.filter(c => !c.dead && !c.caught && Sf.chunkKey(P.chunkOf(P.theta(c.x, c.y))) === ci); if (!live.length) return d0 && d0.saved ? d0 : null; return Object.assign({ b: [] }, d0 || {}, { saved: true, t: Date.now(), c: ((d0 && d0.c) || []).filter(q => !live.some(c => c.id === q.id)).concat(live.map(Sf.serialCreature)) }); };
+   Sf.unpack = (data, nowMs) => { if (!data || !(data.v <= RS.SAVE_V)) return false; Sf.clay = null; Sf.mods = data.mods || Sf.mods; if (RS.Symbols) RS.Symbols.loadUser(Sf); if (Sf.orbit) Sf.orbit.unpack(data.sats); Sf.mix = data.mix || {}; Sf.dawEdits = data.daw || {}; if (Sf.mods.music) { if (Sf.mods.music.bpm) M.bpm = Sf.mods.music.bpm; if (Sf.mods.music.root != null) M.root = Sf.mods.music.root; } Sf.chunks = data.chunks || {}; Sf.chunks.started = data.started; if (RS.Items && data.items) RS.Items.unpack(Sf, data.items); if (data.clay) Sf.pendClay = data.clay;   /* v0.3.2: clay saved mid-shaping hatches (safely, as shaped) on the next load */ for (const k in Sf.chunks) if (k !== 'started') Sf.dirty.add(+k);
+     if (RS.Water && Sf.water && data.water) RS.Water.unpack(Sf, data.water); if (RS.Grow) RS.Grow.unpack(Sf, data.grow, nowMs || Date.now(), data.t);   /* v0.5a: plants, traces, carried seeds; plants keep growing for the time away (up to 3 days) */
+     const el = RS.clamp(((nowMs || Date.now()) - data.t) / 1000, 0, 7200); if (el > 5) Sf.catchUp(el); return true; };
+diff -ruN -x node_modules softsound_v08prep_base/tests/pw_launch.js softsound_v08prep/tests/pw_launch.js
+--- a/tests/pw_launch.js	2026-10-23 00:34:31.000000000 -0600
++++ b/tests/pw_launch.js	2026-10-23 04:35:31.882143798 -0600
+@@ -5,8 +5,8 @@
+   const errs = []; p.on('pageerror', e => errs.push(e.message));
+   const L = () => p.evaluate(() => { const A = RSAPP, k = A.launch; return { seed: k.seed, cat: k.cat, type: k.type, sys: k.sysI, th: +k.th.toFixed(3), key: k.key, scene: JSON.stringify(k.scene), level: A.level, ohms: A.Sf.creatures.filter(c => !c.dead).length, guide: !!A.Sf.creatures.find(c => c.guide), fr: A.Sf.frame }; });
+   await p.goto('http://localhost:8811/index.html'); await p.waitForTimeout(1800); const a = await L();
+-  // let it save: a save of the fresh world must be written under its own key
+-  const saved = await p.evaluate(() => { RSAPP.save(); return !!RS.Store.get(RSAPP.Sf.key); }); await p.waitForTimeout(600);
++  // let it save: a save of the fresh world must be written under its own key (v0.8 H: an unchanged world stores nothing, so make a change first)
++  const saved = await p.evaluate(() => { const Sf = RSAPP.Sf; if (RS.Save) { Sf.mods.launchN = 1; RS.Save.markAt(Sf, Sf.view.cx, Sf.view.cy); } RSAPP.save(); return RS.Save ? RS.Save.has(Sf.key) : !!RS.Store.get(Sf.key); }); await p.waitForTimeout(600);
+   await p.reload(); await p.waitForTimeout(1800); const c = await L();
+   ok('I two launches give different seeds and scenes', a.seed !== c.seed && (a.scene !== c.scene || a.key !== c.key), { a, c });
+   ok('I a launch lands on a surface with a varied opening scene (2+ ohms, guide while lessons are not done) and runs', a.level === 'surface' && a.ohms >= 3 && a.guide && c.ohms >= 3 && c.fr > 30, { a: [a.ohms, a.guide, a.fr], c: [c.ohms, c.guide, c.fr] });
+diff -ruN -x node_modules softsound_v08prep_base/tests/pw_save.js softsound_v08prep/tests/pw_save.js
+--- a/tests/pw_save.js	2026-10-23 00:34:05.000000000 -0600
++++ b/tests/pw_save.js	2026-10-23 04:20:20.731659692 -0600
+@@ -1,23 +1,44 @@
+-// v0.5a browser check: IndexedDB-first saves. Survives reload, survives a wiped localStorage (no reload dance), falls back to the .bak on a
+-// corrupt copy, takes a newer localStorage-only copy (legacy migration) and keeps a save far bigger than localStorage could hold.
++// v0.8 H browser check (replaces the v0.5a version; same intents on the rs2 layout): IndexedDB-first; an unchanged world stores nothing;
++// a change survives a reload and a wiped localStorage; a corrupt copy falls back to the .bak; a world too big for localStorage round-trips;
++// random start: three launches, a change in each, all three reachable (profile -> galaxy -> world) and load with their change, other
++// galaxies show as smudges at minimum zoom and flyGalaxy reaches them; saving never costs a long frame; the hide flush is < 30 ms.
+ const { chromium } = require('playwright');
+ const res = []; const ok = (n, p, i) => { res.push(!!p); console.log((p ? 'ok  ' : 'FAIL') + ' ' + n + (i !== undefined ? '  ' + JSON.stringify(i) : '')); };
+ (async () => { const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] }); const ctx = await b.newContext({ viewport: { width: 412, height: 860 } }); const p = await ctx.newPage();
+   const errs = []; p.on('pageerror', e => errs.push(e.message)); const W = ms => p.waitForTimeout(ms), E = (f, a) => p.evaluate(f, a);
+-  const load = async () => { await p.reload(); await p.waitForFunction(() => window.RSAPP && RSAPP.Sf, null, { timeout: 8000 }); await W(300); };
+-  const probe = () => E(() => RSAPP.Sf.mods.saveProbe);
+-  await p.goto('http://localhost:8811/index.html?fixed=1'); await p.waitForFunction(() => window.RSAPP && RSAPP.Sf, null, { timeout: 8000 });
+-  ok('store loaded from IndexedDB before the app started', await E(() => RS.Store.loaded && RS.Store.IDB.ok));
+-  await E(() => { RSAPP.Sf.mods.saveProbe = 42; RSAPP.save(); }); await W(400); await load();
+-  ok('save survives a reload', (await probe()) === 42, await probe());
+-  await E(() => { RSAPP.Sf.mods.saveProbe = 44; RSAPP.save(); }); await W(400); await E(() => { RSAPP.save = () => { }; localStorage.clear(); }); await load();
+-  ok('wiped localStorage: restored straight from IndexedDB (no reload dance)', (await probe()) === 44 && (await E(() => RS.Store.src[RSAPP.Sf.key])) === 'idb', await probe());
+-  await E(() => { RSAPP.Sf.mods.saveProbe = 45; RSAPP.save(); RSAPP.Sf.mods.saveProbe = 46; RSAPP.save(); }); await W(400);
+-  await E(() => { RS.Store.raw.set(RSAPP.Sf.key, '{"broken'); RSAPP.save = () => { }; }); await W(400); await load();
+-  ok('corrupt copy -> previous good copy (.bak) loads and is repaired', (await probe()) === 45 && (await E(() => RS.Store.repaired)) >= 1, await probe());
+-  await E(() => { const k = RSAPP.Sf.key, d = RS.Store.get(k); d.mods.saveProbe = 47; d.t = Date.now() + 5000; RSAPP.save = () => { }; localStorage.setItem(k, JSON.stringify(d)); }); await load();
+-  ok('a newer localStorage-only copy wins and is migrated into IndexedDB', (await probe()) === 47 && (await E(() => RS.Store.src[RSAPP.Sf.key])) === 'ls', await probe());
+-  await E(() => { RSAPP.Sf.mods.big = 'x'.repeat(1500000); RSAPP.save(); }); await W(800); await E(() => { RSAPP.save = () => { }; localStorage.clear(); }); await load();
+-  const big = await E(() => (RSAPP.Sf.mods.big || '').length); ok('a 1.5 MB save (too big for localStorage) round-trips via IndexedDB', big === 1500000, big);
+-  await E(() => { delete RSAPP.Sf.mods.big; RSAPP.save(); }); await W(300);
++  const URL = 'http://localhost:8811/index.html', ready = () => p.waitForFunction(() => window.RSAPP && RSAPP.Sf && RS.Save, null, { timeout: 8000 });
++  const load = async (q = '?fixed=1') => { await p.goto(URL + q); await ready(); await W(400); };
++  const probe = () => E(() => RSAPP.Sf.mods.saveProbe), keys = pre => E(pre => Object.keys(RS.Store.mem).filter(k => k.startsWith(pre) && !k.endsWith('.bak')), pre);
++  const edit = v => E(v => { const Sf = RSAPP.Sf; Sf.mods.saveProbe = v; RS.Save.mark(Sf, null); RSAPP.save(); }, v);
++  await load(); ok('store loaded from IndexedDB before the app started; rs2 layout', await E(() => RS.Store.loaded && RS.Store.IDB.ok && RS.Store.prefix === 'rs2:'));
++  await W(2600); await E(() => RSAPP.save()); const w0 = await keys('rs2:w:'), c0 = await keys('rs2:c:'), p0 = await keys('rs2:p');
++  ok('an unchanged world stores nothing (the profile is stored)', w0.length === 0 && c0.length === 0 && p0.length === 1, { w0, c0: c0.length, p0 });
++  await edit(42); await W(300); await load(); ok('a change survives a reload', (await probe()) === 42 && (await E(() => RS.Save.isChanged(RSAPP.Sf.key))), await probe());
++  await edit(44); await W(300); await E(() => { RSAPP.save = () => { }; localStorage.clear(); }); await load();
++  ok('wiped localStorage: restored straight from IndexedDB', (await probe()) === 44, await probe());
++  await edit(45); await edit(46); await W(300); await E(() => { RS.Store.raw.set(RSAPP.Sf.key, '{"broken'); RSAPP.save = () => { }; }); await W(300); await load();
++  ok('corrupt copy -> the previous good copy (.bak) loads', (await probe()) === 45, await probe());
++  await E(() => { const Sf = RSAPP.Sf; Sf.mods.big = 'x'.repeat(400000); RS.Save.mark(Sf, null); RSAPP.save(); }); await W(500); await E(() => { RSAPP.save = () => { }; localStorage.clear(); }); await load();
++  const big = await E(() => (RSAPP.Sf.mods.big || '').length); ok('a world header bigger than the localStorage mirror allows round-trips via IndexedDB', big === 400000, big);
++  await E(() => { delete RSAPP.Sf.mods.big; RS.Save.mark(RSAPP.Sf, null); RSAPP.save(); }); await W(300);
++  // random start: three launches (each a fresh random world), one change in each
++  const L = []; for (let i = 0; i < 3; i++) { await load(''); await W(300); const k = await E(() => RSAPP.Sf.key), u = await E(() => RSAPP.meta.useed); await edit(100 + i); await W(200); L.push({ k, u, v: 100 + i }); }
++  await load(''); const cw = await E(() => RS.Save.changedWorlds().map(w => w.key)), gal = await E(() => RS.Save.galaxies()), launches = await E(() => RS.Save.prof.stats.launches);
++  const back = []; for (const l of L) back.push(await E(l => { const d = RS.Save.loadWorld(l.k); return d && d.mods && d.mods.saveProbe; }, l));
++  ok('three launches: each changed world is in its galaxy index and its galaxy is in the profile; each loads with its change', L.every(l => cw.includes(l.k) && gal.includes(l.u)) && back.every((v, i) => v === L[i].v) && launches >= 3, { L, back, launches, nGal: gal.length });
++  const off = await E(() => { RSAPP.gcam.z = .4; const n = RSAPP.smudges().length; RSAPP.gcam.z = 1; return n; });
++  ok('Q59 not approved: by default no smudges, so galaxy double tap is unchanged from v0.7', off === 0, { off });
++  const sm = await E(() => { RSAPP.wayBack = true; RSAPP.gcam.z = .4; const s = RSAPP.smudges(); RSAPP.gcam.z = 1; return s.map(g => g.u); });
++  const cur = await E(() => RSAPP.meta.useed), want = [...new Set(L.map(l => l.u))].filter(u => u !== cur);
++  ok('minimum galaxy zoom shows every other changed galaxy as a smudge (none at normal zoom)', want.every(u => sm.includes(u)) && (await E(() => RSAPP.smudges().length)) === 0, { sm, want });
++  const tgt = L[0]; const got = await E(t => { const [, , u, sys, bk] = t.k.split(':'); RSAPP.leaveSurface(); RSAPP.flyGalaxy(+u); const S = RSAPP.system(+sys); const body = [...S.bodies, ...S.bodies.flatMap(q => q.moons || [])].find(q => RSAPP.bodyKey(S, q) === bk); RSAPP.enterSurface(+sys, body, 0); return { key: RSAPP.Sf.key, v: RSAPP.Sf.mods.saveProbe, glow: RS.Save.isChanged(RSAPP.Sf.key) }; }, tgt);
++  ok('way back: fly to the galaxy (smudge target) and enter the glowing body -> your change loads', got.key === tgt.k && got.v === tgt.v && got.glow, got);
++  // saving cost while playing: edits every 700 ms for 12 s; slices and the hide flush
++  await E(() => { RS.Save.stats.sliceMs.length = 0; window.__long = 0; let last = performance.now(); const f = () => { const n = performance.now(); if (n - last > 50) window.__long++; last = n; if (window.__run) requestAnimationFrame(f); }; window.__run = 1; requestAnimationFrame(f); });
++  for (let i = 0; i < 17; i++) { await E(i => { const Sf = RSAPP.Sf; Sf.mods.soakN = i; RS.Save.markAt(Sf, Sf.view.cx, Sf.view.cy); }, i); await W(700); }
++  await W(2500); const sl = await E(() => { window.__run = 0; const a = RS.Save.stats.sliceMs; return { n: a.length, max: a.length ? Math.max(...a) : 0 }; });
++  await E(() => { const Sf = RSAPP.Sf; Sf.mods.soakN = 99; RS.Save.markAt(Sf, Sf.view.cx, Sf.view.cy); RS.Save.hide(); }); const hide = await E(() => ({ ms: RS.Save.stats.hideMs, flushN: RS.Save.stats.flushN }));
++  ok('idle saver ran during play and no save slice reached 16 ms', sl.n >= 1 && sl.max < 16, sl);
++  ok('hide flush (dirty header + chunks only) under 30 ms', hide.ms != null && hide.ms < 30, hide);
++  await load(''); await E(() => { RSAPP.save = () => { }; });
+   ok('no page errors', errs.length === 0, errs.slice(0, 3)); console.log('SAVE ' + res.filter(Boolean).length + '/' + res.length); await b.close(); })();
+diff -ruN -x node_modules softsound_v08prep_base/tests/runprep.sh softsound_v08prep/tests/runprep.sh
+--- a/tests/runprep.sh	1969-12-31 17:00:00.000000000 -0700
++++ b/tests/runprep.sh	2026-10-23 04:19:42.083708861 -0600
+@@ -0,0 +1,12 @@
++#!/bin/bash
++# v0.8 chunk-1 prep suite: runs in the COPY (/workspace/softsound_v08prep), serial, port 8812, results in /tmp/res_prep.
++# Browser tests run from /tmp/prep_pw copies with 8811 -> 8812 so they hit this tree's www, never the live v0.7 server.
++R=/workspace/softsound_v08prep; cd $R; mkdir -p /tmp/res_prep /tmp/prep_pw; rm -f /tmp/res_prep/*.txt
++[ -e /tmp/prep_pw/node_modules ] || ln -s $R/node_modules /tmp/prep_pw/node_modules
++curl -s -o /dev/null localhost:8812/index.html || (cd www && nohup python3 -m http.server 8812 >/tmp/http8812.log 2>&1 &) ; sleep 1
++T=${T:-"test_world test_abilities test_v2 test_music test_daw harm_check v032_check v04a_check v04b_check v05a_check v05b_check v05c_check v06_check v061_check v062_check mold_check symbols_check breed_check breakdown_check cues_check delete_check env_check ground_check guide_check items_check mind_check play_check social_check variety_check render_check pw_smoke pw_app pw_tap pw_clay pw_save pw_gas v07_check pw_v07 pw_launch v08_save soak_save perf_j"}
++for t in $T; do s=$(date +%s)
++  if [[ $t == pw_* ]]; then sed 's/8811/8812/g' tests/$t.js > /tmp/prep_pw/$t.js; cmd="node /tmp/prep_pw/$t.js"; elif [ $t = soak_save ]; then cmd="node --expose-gc tests/$t.js"; else cmd="node tests/$t.js"; fi
++  out=$(timeout 1500 nice -n 10 $cmd 2>&1); ec=$?; f=$(printf '%s\n' "$out" | grep -c '^ *FAIL'); [ $ec -ne 0 ] && [ $f -eq 0 ] && f="exit$ec"
++  { echo "$t | fails=$f | $(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1 | cut -c1-150) | $(( $(date +%s)-s ))s"; printf '%s\n' "$out" | grep '^ *FAIL' | cut -c1-400; } > /tmp/res_prep/$t.txt; cat /tmp/res_prep/$t.txt; done
++echo SUITE_DONE
+diff -ruN -x node_modules softsound_v08prep_base/tests/save_env.js softsound_v08prep/tests/save_env.js
+--- a/tests/save_env.js	1969-12-31 17:00:00.000000000 -0700
++++ b/tests/save_env.js	2026-10-23 04:00:34.413880868 -0600
+@@ -0,0 +1,15 @@
++// v0.8 H test harness: node_env + store.js + persist.js on a fake IndexedDB that survives simulated app restarts
++const T = require('./node_env.js'); const path = require('path');
++const DB = new Map(); const later = f => setImmediate(f);
++const req = () => ({ onsuccess: null, onerror: null, result: null });
++global.indexedDB = { open: () => { const r = req(); r.onupgradeneeded = null; later(() => { r.result = { transaction: () => { const tx = { oncomplete: null, onerror: null, onabort: null, objectStore: () => ({ put: (v, k) => DB.set(k, v), delete: k => DB.delete(k),
++  openCursor: () => { const c = req(), ks = [...DB.keys()]; let i = 0; const nx = () => later(() => { c.result = i < ks.length ? { key: ks[i], value: DB.get(ks[i]), continue: () => { i++; nx(); } } : null; c.onsuccess && c.onsuccess(); }); nx(); return c; } }) }; later(() => tx.oncomplete && tx.oncomplete()); return tx; }, createObjectStore: () => { } }; r.onsuccess && r.onsuccess(); }); return r; } };
++const js = f => path.join(__dirname, '../www/js', f);
++// (re)start the save layer: a fresh Store + Save, as after an app restart; resolves when Store.ready() finished reading the fake IDB
++T.boot = async () => { for (const f of ['store.js', 'persist.js']) delete require.cache[require.resolve(js(f))]; require(js('store.js')); require(js('persist.js')); await RS.Store.ready(); await new Promise(r => setImmediate(r)); return RS.Save; };
++T.DB = DB;
++T.settle = () => new Promise(r => setTimeout(r, 5));
++T.bodyKey = (S, b) => b.kind === 'moon' ? 'p' + S.bodies.find(p => p.moons.includes(b)).k + 'm' + b.k : 'p' + b.k;   // = App.bodyKey
++// a world entered like App.enterSurface does: key, load (if saved), attach
++T.enter = (opt = {}) => { const o = T.make(opt), Sf = o.Sf, SV = RS.Save, key = SV.worldKey(opt.useed || 1, o.sys, o.body || Sf.body || (opt.sys ? o.sys.bodies[0] : o.sys.bodies[1].moons[0]), T.bodyKey); const data = SV.loadWorld(key); if (data) Sf.unpack(data, Date.now()); SV.attach(Sf, key, data); o.key = key; o.data = data; return o; };
++module.exports = T;
+diff -ruN -x node_modules softsound_v08prep_base/tests/soak_save.js softsound_v08prep/tests/soak_save.js
+--- a/tests/soak_save.js	1969-12-31 17:00:00.000000000 -0700
++++ b/tests/soak_save.js	2026-10-23 04:18:16.067810303 -0600
+@@ -0,0 +1,51 @@
++// v0.8 H shortened save soak (V08_SPEC H, accelerated): 6 "hours" = 360 sim minutes. Each sim minute = 1 s of real stepping, a steady edit
++// rate, and 60 s of idle-save clock. Travel: a new world every 3 minutes across 20 worlds in 3 universes (all visited by hour 1, revisited
++// 6x by hour 6). Edits per minute: 2 strokes while the world has < CAP player-made bodies, else 2 moves of an existing player body
++// (a sandbox being worked, not only grown), a birth every 3 min (<= 16 ohms), a tap every 2 min, a water pour mod every 5 min.
++// Checks (spec H): size(6 h) <= 1.5 x size(1 h) at a steady edit rate and within budget; world load <= 150 ms; idle slice p99 <= 3 ms;
++// sim step time on a reference world at hour 6 within 10% of hour 1; heap at hour 6 within 15% of hour 1; the last state round-trips.
++// MIN=<n> sim minutes (default 360), CAP=<n> player bodies per world (default 24).
++const T = require('./save_env.js'), RS = global.RS, { performance } = require('perf_hooks');
++const res = []; const ok = (n, p, i) => { res.push(!!p); console.log((p ? 'ok  ' : 'FAIL') + ' ' + n + (i !== undefined ? '  ' + JSON.stringify(i) : '')); };
++const MIN = +(process.env.MIN || 360), CAP = +(process.env.CAP || 24), St = () => RS.Store, H1 = Math.min(60, MIN);
++const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))] || 0; };
++const W = []; for (let s = 0; s < 10; s++) W.push({ useed: 101, sys: s }); for (let s = 0; s < 5; s++) W.push({ useed: 202, sys: s }); for (let s = 0; s < 5; s++) W.push({ useed: 303, sys: s });
++(async () => { T.DB.clear(); let SV = await T.boot(); const meta = St().meta(); let clk = 1e6; SV.now = () => clk;
++  let o = null; const mineOf = Sf => [...Sf.W.bodies.values()].filter(b => b.meta && b.meta.role === 'instrument' && !b.meta.owner && !b.meta.glass);   // player-made strokes
++  const items = {}; const leave = () => { if (!o) return; if (o.key.indexOf(':909:') < 0) items[o.key] = mineOf(o.Sf).length + o.Sf.creatures.filter(c => !c.dead && !c.caught).length; SV.flush(o.Sf); meta.mods[o.key] = o.Sf.mods; St().saveMeta(meta); o = null; };
++  const enter = opt => { leave(); T.t = 0; if (T.notes) T.notes.length = 0; if (T.tract) T.tract.length = 0;   /* node_env's audio stub records every note / tract call (and so every old world); a phone plays and forgets them */ o = T.enter(opt); SV.app = { Sf: o.Sf, save: () => St().saveMeta(meta) }; T.run(o.Sf, .3); return o; };
++  // reference world: never edited (so never stored); same content every visit -> step time and heap comparable across hours
++  const ref = () => { enter({ useed: 909, sys: 2 }); T.run(o.Sf, 1); const ms = []; for (let r = 0; r < 5; r++) { const t0 = performance.now(); for (let i = 0; i < 30; i++) { T.t += 1 / 30; o.Sf.step(1 / 30); } ms.push((performance.now() - t0) / 30); } leave(); global.gc && global.gc(); global.gc && global.gc(); return { step: q(ms, .5), heap: process.memoryUsage().heapUsed, data: dataHeap() }; };
++  // heap minus V8's own compiled code / feedback / object shapes (they keep growing as the JIT warms up over hours; not app data)
++  const dataHeap = () => { const d = JSON.parse(require('fs').readFileSync(require('v8').writeHeapSnapshot('/tmp/soak_save_' + process.pid + '.heapsnapshot'), 'utf8')); try { require('fs').unlinkSync('/tmp/soak_save_' + process.pid + '.heapsnapshot'); } catch (e) { } const m = d.snapshot.meta, nf = m.node_fields, N = nf.length, ti = nf.indexOf('type'), si = nf.indexOf('self_size'), nt = m.node_types[0], nodes = d.nodes; let sum = 0; for (let i = 0; i < nodes.length; i += N) { const t = nt[nodes[i + ti]]; if (t !== 'code' && t !== 'object shape') sum += nodes[i + si]; } return sum; };
++  const r = RS.rng(12345), memC = {}, nItems = {}, sizes = {}, refs = {}, sliceAll = [], loads = []; let wi = -1;
++  for (let m = 1; m <= MIN; m++) { if ((m - 1) % 3 === 0) { wi = (wi + 1) % W.length; enter(W[wi]); } const Sf = o.Sf;
++    for (let e = 0; e < 2; e++) { const live = mineOf(Sf);
++      if (live.length < CAP) { const x = Sf.view.cx + r.range(-160, 160), g = Sf.ground(x), pts = []; for (let i = 0; i < 12; i++) pts.push([x - 60 + i * 10, g - 70 - r() * 30]); Sf.stroke(pts, pts.map((_, i) => i * 15), {}); }
++      else { const b = live[Math.floor(r() * live.length)]; const [x, y] = Sf.W.center(b); if (Sf.grabStart(x, y)) { Sf.grabMove(x + r.range(-30, 30), y - 10); Sf.grabEnd(0, 0); } SV.markAt(Sf, x, y); } }
++    if (m % 3 === 0 && Sf.creatures.length < 16) { const c = T.add(Sf, T.plain(m), Sf.view.cx + r.range(-150, 150)); SV.markAt(Sf, c.x, c.y); }
++    if (m % 2 === 0 && Sf.creatures.length) { const c = Sf.creatures[Math.floor(r() * Sf.creatures.length)]; if (!c.dead && !c.caught) Sf.tap(c.x, c.y); }
++    if (m % 5 === 0) { Sf.mods.water = RS.clamp((Sf.mods.water || 0) + .02, 0, 1); SV.mark(Sf, null); }
++    for (let i = 0; i < 30; i++) { T.t += 1 / 30; Sf.step(1 / 30); }
++    clk += 60000; SV.pump(Sf); let g = 0; while (Sf._sv.q && g++ < 500) sliceAll.push(SV.slice(Sf, 3)); await new Promise(r => setTimeout(r, 0));   // let the (fallback) idle timers run, as a real event loop would
++    if (m === H1 || m === MIN || m === Math.round(MIN / 2)) { const cur = W[wi]; leave(); sizes[m] = SV.size(); nItems[m] = Object.values(items).reduce((a, b) => a + b, 0); memC[m] = Object.keys(St().mem).reduce((a, k) => a + String(St().mem[k]).length, 0); refs[m] = ref(); const t0 = performance.now(); enter(cur); loads.push(performance.now() - t0); } }
++  leave(); const nw = SV.changedWorlds().length, wr = { writes: SV.stats.writes, skipped: SV.stats.skipped, KB: Math.round(SV.stats.bytes / 1024) };
++  let big = 0, bigK = null; const per = {}; for (const k in St().mem) if (k.startsWith('rs2:') && !k.endsWith('.bak')) { const t = k.split(':')[1]; per[t] = (per[t] || 0) + St().mem[k].length; }
++  for (const w of SV.changedWorlds()) { let n = (St().mem[w.key] || '').length; for (const k in St().mem) if (k.startsWith('rs2:c:' + w.key.slice(6) + ':') && !k.endsWith('.bak')) n += St().mem[k].length; if (n > big) { big = n; bigK = w.key; } }
++  // last state round-trips after a restart; world load time on the biggest world
++  enter(W[wi]); const lastKey = o.key, ids0 = o.Sf.creatures.filter(c => !c.dead && !c.caught).map(c => c.id).sort(), bod0 = mineOf(o.Sf).length; leave();
++  await T.settle(); SV = await T.boot(); SV.now = () => clk; T.t = 0; const t0 = performance.now(); o = T.enter(W[wi]); const ldMs = performance.now() - t0; T.run(o.Sf, .2); const ids1 = o.Sf.creatures.filter(c => !c.dead && !c.caught).map(c => c.id).sort(), bod1 = mineOf(o.Sf).length;
++  const bw = W.find(w => SV.worldKey(w.useed, RS.System(RS.Universe(w.useed), w.sys), w.sys ? RS.System(RS.Universe(w.useed), w.sys).bodies[0] : RS.System(RS.Universe(w.useed), 0).bodies[1].moons[0], T.bodyKey) === bigK); const tb = performance.now(); if (bw) T.enter(bw); const bigLd = performance.now() - tb;
++  const s1 = sizes[H1], s6 = sizes[MIN], p99 = q(sliceAll, .99), r1 = refs[H1], r6 = refs[MIN];
++  console.log('perf', JSON.stringify({ minutes: MIN, cap: CAP, changedWorlds: nw, sizeKB: Object.fromEntries(Object.entries(sizes).map(([k, v]) => [k, +(v / 1024).toFixed(1)])), perKindKB: Object.fromEntries(Object.entries(per).map(([k, v]) => [k, +(v / 1024).toFixed(1)])), biggestWorldKB: +(big / 1024).toFixed(1), slices: sliceAll.length, sliceMs: { p50: +q(sliceAll, .5).toFixed(3), p99: +p99.toFixed(3), max: +Math.max(...sliceAll).toFixed(3) }, refStepMs: Object.fromEntries(Object.entries(refs).map(([k, v]) => [k, +v.step.toFixed(3)])), refHeapMB: Object.fromEntries(Object.entries(refs).map(([k, v]) => [k, +(v.heap / 1e6).toFixed(1)])), refDataHeapMB: Object.fromEntries(Object.entries(refs).map(([k, v]) => [k, +(v.data / 1e6).toFixed(2)])), loadMs: { last: +ldMs.toFixed(1), biggest: +bigLd.toFixed(1), inRunMax: +Math.max(...loads).toFixed(1) }, writes: wr }));
++  const b1 = s1 / nItems[H1], b6 = s6 / nItems[MIN];   // player-made content keeps growing here (no content cap exists), so 'steady' = bytes per stored item
++  ok('SOAK size: bytes per player-made item (bodies + ohms) after 6 h <= 1.5 x after 1 h (no history bloat); every world <= 256 KB typical; total <= 50 MB', b6 <= b1 * 1.5 && big <= 256 * 1024 && s6 <= 50e6, { s1, s6, rawRatio: +(s6 / s1).toFixed(2), items1: nItems[H1], items6: nItems[MIN], bytesPerItem1: Math.round(b1), bytesPerItem6: Math.round(b6), big });
++  ok('SOAK world load <= 150 ms (node): the last world and the biggest world', ldMs <= 150 && bigLd <= 150, { ldMs, bigLd });
++  ok('SOAK idle saver slices: p99 <= 3 ms', p99 <= 3, { p99: +p99.toFixed(3) });
++  ok('SOAK reference-world sim step at hour 6 within 10% of hour 1 (+.05 ms timer noise)', r6.step <= r1.step * 1.1 + .05, { h1: r1.step, h6: r6.step });
++  // the store keeps every record (and its .bak) in memory by design (store.js mem cache); the saved content itself grows here, so the heap allowance is 15% of hour 1 plus 2 bytes per added stored char
++  const allow = r1.data * .15 + 2 * (memC[MIN] - memC[H1]);
++  ok('SOAK data heap (heap minus JIT code / shapes) at hour 6 within 15% of hour 1 plus the in-memory copy of the added saved content; persistence memory <= 20 MB', r6.data - r1.data <= allow && 2 * memC[MIN] <= 20e6, { dataH1MB: +(r1.data / 1e6).toFixed(2), dataH6MB: +(r6.data / 1e6).toFixed(2), allowMB: +(allow / 1e6).toFixed(2), totalH1MB: +(r1.heap / 1e6).toFixed(1), totalH6MB: +(r6.heap / 1e6).toFixed(1), totalRatio: +(r6.heap / r1.heap).toFixed(2), storeMemMB: +(2 * memC[MIN] / 1e6).toFixed(2) });
++  ok('SOAK the last world round-trips after a restart (same ohm ids, same player bodies)', ids0.length > 0 && JSON.stringify(ids0) === JSON.stringify(ids1) && bod0 === bod1 && bod0 > 0, { n0: ids0.length, n1: ids1.length, bod0, bod1 });
++  console.log(res.every(Boolean) ? 'ALL OK' : 'SOME FAILED', res.filter(Boolean).length + '/' + res.length); process.exit(0);
++})().catch(e => { console.error(e); console.log('SOME FAILED (exception)'); process.exit(1); });
+diff -ruN -x node_modules softsound_v08prep_base/tests/v08_save.js softsound_v08prep/tests/v08_save.js
+--- a/tests/v08_save.js	1969-12-31 17:00:00.000000000 -0700
++++ b/tests/v08_save.js	2026-10-23 04:02:38.533578941 -0600
+@@ -0,0 +1,83 @@
++// v0.8 H (chunk 1) headless checks: the rs2 save system (persist.js) + O1 per-ohm counters. ONLY=<name> runs one block.
++const T = require('./save_env.js'), RS = global.RS;
++const res = []; const ok = (n, p, i) => { res.push(!!p); console.log((p ? 'ok  ' : 'FAIL') + ' ' + n + (i !== undefined ? '  ' + JSON.stringify(i) : '')); };
++const ONLY = process.env.ONLY || '';
++const St = () => RS.Store, mem = () => RS.Store.mem;
++const keys = pre => Object.keys(mem()).filter(k => k.startsWith(pre) && !k.endsWith('.bak'));
++const line = (Sf, dx = 0) => { const x = Sf.view.cx + dx, g = Sf.ground(x), pts = []; for (let i = 0; i < 20; i++) pts.push([x - 100 + i * 10, g - 80 - Math.sin(i / 3) * 10]); return Sf.stroke(pts, pts.map((_, i) => i * 15), {}); };
++const boot = async () => { const SV = await T.boot(); T.meta = St().meta(); SV.app = null; return SV; };
++const enter = opt => { T.t = 0; const o = T.enter(opt); RS.Save.app = { Sf: o.Sf, save: () => St().saveMeta(T.meta) }; return o; };
++const leave = o => { const SV = RS.Save; SV.flush(o.Sf); T.meta.mods[o.key] = o.Sf.mods; St().saveMeta(T.meta); };
++const restart = async () => { await T.settle(); return boot(); };
++(async () => {
++// ---------- H.1 fresh start: old rs1 saves ignored (not loaded, not migrated, not deleted)
++if (!ONLY || ONLY === 'fresh') { T.DB.clear(); T.DB.set('rs1:meta', JSON.stringify({ v: 3, t: 1, useed: 77, lineage: [{ id: 'x' }], alive: { '77:0': .9 }, orbit: {}, mods: {}, seen: {} })); T.DB.set('rs1:ark', JSON.stringify({ v: 1, t: 1, chunks: {} }));
++  const SV = await boot(); const m = T.meta;
++  ok('H1 fresh start: rs1 saves are not loaded into memory, the profile starts empty, and the old keys are still on disk (not migrated, not deleted)', !keys('rs1:').length && m.useed === 1 && !m.lineage.length && T.DB.has('rs1:meta') && T.DB.has('rs1:ark') && St().prefix === 'rs2:', { useed: m.useed, onDisk: [...T.DB.keys()] }); }
++// ---------- H.2 a world with no player change stores nothing
++if (!ONLY || ONLY === 'nodelta') { T.DB.clear(); const SV = await boot(); const o = enter({ useed: 11 }); T.run(o.Sf, 3); SV.pump(o.Sf, 1e7); SV.drain(o.Sf); const n = SV.flush(o.Sf); leave(o);
++  ok('H2 visiting a world without changing it writes no world or chunk record', !keys('rs2:w:').length && !keys('rs2:c:').length && n === 0 && !SV.changedWorlds().length, { w: keys('rs2:w:'), c: keys('rs2:c:').length }); }
++// ---------- H.3 round trip: header + chunks + ohms (+ tally) + mods survive a restart; unchanged chunks are not rewritten
++let rt = null;
++if (!ONLY || ONLY === 'roundtrip' || ONLY === 'registry') { T.DB.clear(); let SV = await boot(); let o = enter({ useed: 21 }); const Sf = o.Sf; T.run(Sf, 1);
++  const r = line(Sf); const a = T.add(Sf, T.plain(31), Sf.view.cx - 60), b = T.add(Sf, T.plain(32), Sf.view.cx + 60); SV.markAt(Sf, a.x, a.y); T.run(Sf, .5); Sf.tap(a.x, a.y); Sf.mods.water = .37; Sf.mix = { bus: 1 };
++  T.run(Sf, 2.2); SV.pump(Sf, 1e7); SV.drain(Sf); const w0 = SV.stats.writes; SV.pump(Sf, 2e7); SV.drain(Sf); const rewrite = SV.stats.writes - w0; leave(o);
++  const ids0 = Sf.creatures.filter(c => !c.dead).map(c => c.id).sort(), mats0 = [...Sf.W.bodies.values()].filter(q => q.meta && q.meta.role === 'instrument').length, ta = JSON.stringify(a.tally);
++  SV = await restart(); o = enter({ useed: 21 }); const S2 = o.Sf; for (const ci of [...S2.active]) S2.deactivate(ci); T.run(S2, .1);
++  const ids1 = S2.creatures.filter(c => !c.dead).map(c => c.id).sort(), a2 = S2.creatures.find(c => c.id === a.id), mats1 = [...S2.W.bodies.values()].filter(q => q.meta && q.meta.role === 'instrument').length;
++  ok('H3 round trip: the drawn material, both ohms (same ids), the tapped ohm\'s counters and the world mods/mix come back after a restart', r && r.k === 'material' && o.data && JSON.stringify(ids0) === JSON.stringify(ids1) && a2 && JSON.stringify(a2.tally) === ta && a2.tally.i >= 1 && mats1 === mats0 && mats0 > 0 && S2.mods.water === .37 && S2.mix.bus === 1, { ids0, ids1, mats0, mats1, ta, t2: a2 && a2.tally });
++  ok('H3b delta: a second save pass with nothing new rewrites no chunk', rewrite <= 1, { rewrite });   // the header may tick (aliveness)
++  rt = o; }
++// ---------- H.4 registry: unknown components kept verbatim, newer versions untouched, step-wise migration v1 -> v2
++if (!ONLY || ONLY === 'registry') { let SV = RS.Save, o = rt; const k = o.key;
++  SV.register('ztest', { scope: 'world', v: 1, pack: c => c.Sf ? (c.Sf.zt || undefined) : undefined, unpack: (c, d) => { c.h.zt = d; } });
++  o.Sf.zt = { n: 1 }; SV.markAt(o.Sf, o.Sf.view.cx, o.Sf.view.cy); SV.flush(o.Sf); const v1 = JSON.parse(mem()[k]).comp.ztest;
++  const rec = JSON.parse(mem()[k]); rec.comp.alien = { v: 3, d: { x: 42 } }; rec.comp.mix = { v: 99, d: { future: 1 } }; rec.t = Date.now() + 5000; St().putStrs([[k, JSON.stringify(rec)]]);   // as written by a newer build
++  SV = await restart(); SV.register('ztest', { scope: 'world', v: 2, migrate: { 1: d => ({ n: d.n, m: 'migrated' }) }, pack: c => c.Sf ? c.Sf.zt : undefined, unpack: (c, d) => { c.h.zt = d; } });
++  o = enter({ useed: 21 }); const data = o.data; o.Sf.zt = data.zt; const mixNotApplied = !(o.Sf.mix && o.Sf.mix.future); o.Sf.mix = { bus: 2 }; SV.markAt(o.Sf, o.Sf.view.cx, o.Sf.view.cy); SV.flush(o.Sf); const rec2 = JSON.parse(mem()[k]);
++  ok('H4 registry: an unknown component and a newer-version component are kept verbatim through load + save (never applied, never overwritten); a v1 component is migrated to v2', v1 && v1.v === 1 && rec2.comp.alien && rec2.comp.alien.d.x === 42 && rec2.comp.mix.v === 99 && rec2.comp.mix.d.future === 1 && mixNotApplied && data.zt && data.zt.m === 'migrated' && rec2.comp.ztest.v === 2, { alien: rec2.comp.alien, mix: rec2.comp.mix, zt: rec2.comp.ztest });
++  delete SV.comps.ztest; SV.order.world = SV.order.world.filter(x => x !== 'ztest'); }
++// ---------- H.5 reachability: three launches in three galaxies, each changed -> all three listed and loadable after a restart
++if (!ONLY || ONLY === 'reach') { T.DB.clear(); let SV = await boot(); const opts = [{ useed: 31 }, { useed: 4242, sys: 2 }, { useed: 909, sys: 1 }], made = [];
++  for (const op of opts) { SV = await restart(); T.meta.useed = op.useed; const o = enter(op); T.run(o.Sf, .5); const c = T.add(o.Sf, T.plain(op.useed), o.Sf.view.cx); SV.markAt(o.Sf, c.x, c.y); T.run(o.Sf, .3); leave(o); made.push({ key: o.key, id: c.id }); }
++  SV = await restart(); const cw = SV.changedWorlds(), gs = SV.galaxies(); let loaded = 0;
++  for (const m of made) { const d = SV.loadWorld(m.key); if (d && Object.values(d.chunks).some(ch => (ch.c || []).some(s => s.id === m.id))) loaded++; }
++  ok('H5 every changed world is reachable: 3 launches -> 3 galaxies in the profile, 3 worlds in their galaxy records, each loads with its ohm', cw.length === 3 && gs.length === 3 && loaded === 3 && made.every(m => SV.isChanged(m.key)), { cw: cw.map(w => w.key), gs, loaded }); }
++// ---------- H.6 idle-time saving: nothing while edits keep coming, a pass 2 s after the last edit, at most 30 s after the first
++if (!ONLY || ONLY === 'idle') { T.DB.clear(); const SV = await boot(); let clk = 100000; SV.now = () => clk; const o = enter({ useed: 51 }), Sf = o.Sf; T.run(Sf, .5); const st = Sf._sv; const c = T.add(Sf, T.plain(5), Sf.view.cx);
++  SV.pump(Sf); SV.markAt(Sf, c.x, c.y); clk += 1000; SV.pump(Sf); const early = !!st.q; clk += 1100; SV.pump(Sf); const after = !!st.q; SV.drain(Sf);
++  // steady edits every 1 s: the quiet window never comes, the 30 s cap forces a pass
++  let firstAt = null; for (let s = 1; s <= 40 && firstAt == null; s++) { clk += 1000; SV.mark(Sf, null); SV.pump(Sf); if (st.q) firstAt = s; }
++  SV.drain(Sf); clk += 61000; SV.pump(Sf); const drift = !!st.q; SV.drain(Sf); SV.now = () => require('perf_hooks').performance.now();
++  ok('H6 idle save: no pass 1 s after an edit, a pass 2 s after it; under constant edits a pass still comes by 30 s; a 60 s drift pass while ohms live there', !early && after && firstAt != null && firstAt <= 31 && drift, { early, after, firstAt, drift, slices: SV.stats.slices }); }
++// ---------- H.7 O1 counters: watched (on screen only), taps, catches, offspring, teacher; off-screen ohms unchanged; saved via the registry
++if (!ONLY || ONLY === 'tally') { T.DB.clear(); let SV = await boot(); const o = enter({ useed: 61 }), Sf = o.Sf; T.run(Sf, .5);
++  const a = T.add(Sf, T.plain(71), Sf.view.cx - 40), b = T.add(Sf, T.plain(72), Sf.view.cx + 40), far = T.add(Sf, T.plain(73), Sf.view.cx + 1400); T.run(Sf, .3);
++  const vis = () => [a, b, far].map(c => c.lod); T.run(Sf, 10); const wA = a.tally && a.tally.w, wFar = far.tally ? far.tally.w : 0;
++  Sf.tap(a.x, a.y); const i1 = a.tally.i; RS.Creature.teach(Sf, a, b); const e = Sf.layEgg(a, b); if (e) Sf.hatch(e); const off = a.tally.o, teach = (b.tally.t || []).includes(a.id);
++  const cb = Sf.catch(b); const iB = b.tally.i; SV.flush(Sf);
++  ok('O1 watched seconds count only on screen (a ~10 s, the far ohm 0); tap, catch, offspring and teacher are counted', wA >= 9 && wA <= 11 && wFar === 0 && i1 >= 1 && off >= 1 && teach && iB >= 1, { wA, wFar, lod: vis(), i1, off, teach, iB, egg: !!e, caught: !!cb });
++  const st = JSON.parse(mem()[SV.K.c(o.key, Sf.chunkKey(Sf.P.chunkOf(Sf.P.theta(a.x, a.y))))] || '{}'), sa = st.comp && st.comp.ohms.d.find(s => s.id === a.id);
++  ok('O1 counters are stored as the versioned \'tally\' ohm component, a few bytes per ohm', sa && sa.cp && sa.cp.tally && sa.cp.tally.v === 1 && JSON.stringify(sa.cp.tally).length <= 60, sa && sa.cp); }
++// ---------- H.8 zero off-screen per-frame work: an ohm far off screen for 10 sim minutes keeps its counters untouched; step overhead of the hooks
++if (!ONLY || ONLY === 'offscreen') { T.DB.clear(); const SV = await boot(); const o = enter({ useed: 71 }), Sf = o.Sf; T.run(Sf, .5); const far = T.add(Sf, T.plain(75), Sf.view.cx + 1500); far.tally = { w: 3, i: 2, o: 0, t: [] }; const t0 = JSON.stringify(far.tally);
++  const dt = 1 / 20; for (let i = 0; i < 600 * 20 / 10; i++) { T.t += dt * 10; Sf.step(dt * 10); }   // 10 sim minutes, coarse steps
++  const t1 = JSON.stringify(far.tally);
++  // overhead: same world with and without the save hooks
++  const mkRaw = () => { const U = RS.Universe(72), sys = RS.System(U, 0), M = RS.Music(7), S = RS.Surface._raw({ M, A: T.A, sys, body: sys.bodies[1].moons[0], key: 'raw', useed: 72 }); S.now = () => T.t; const [x, y] = S.P.top(0); S.view = { x0: x - 206, x1: x + 206, y0: y - 600, y1: y + 260, cx: x, cy: y - 170, z: 1 }; return S; };
++  const mkHook = () => { const S = RS.Surface({ M: RS.Music(7), A: T.A, sys: RS.System(RS.Universe(72), 0), body: RS.System(RS.Universe(72), 0).bodies[1].moons[0], key: 'hk', useed: 72 }); S.now = () => T.t; const [x, y] = S.P.top(0); S.view = { x0: x - 206, x1: x + 206, y0: y - 600, y1: y + 260, cx: x, cy: y - 170, z: 1 }; SV.attach(S, 'rs2:w:72:0:ark', null); return S; };
++  const time = S => { for (let i = 0; i < 60; i++) { T.t += 1 / 60; S.step(1 / 60); } const t = process.hrtime.bigint(); for (let i = 0; i < 600; i++) { T.t += 1 / 60; S.step(1 / 60); SV.pump(S); } return Number(process.hrtime.bigint() - t) / 1e6 / 600; };
++  const r1 = time(mkRaw()), h1 = time(mkHook()), r2 = time(mkRaw()), h2 = time(mkHook()), raw = Math.min(r1, r2), hk = Math.min(h1, h2);
++  ok('H8 off screen: a far ohm\'s counters are unchanged after 10 sim minutes; the hooks + saver pump add little per frame', t0 === t1 && hk < raw * 1.15 + .05, { t0, t1, rawMs: +raw.toFixed(3), hookedMs: +hk.toFixed(3) }); }
++// ---------- H.9 hide / leave flush: pending edits are written synchronously (no idle pass needed), within a frame budget
++if (!ONLY || ONLY === 'flush') { T.DB.clear(); let SV = await boot(); const o = enter({ useed: 81 }), Sf = o.Sf; T.run(Sf, .5); const r = line(Sf); const c = T.add(Sf, T.plain(9), Sf.view.cx + 30); SV.markAt(Sf, c.x, c.y);
++  const t0 = process.hrtime.bigint(); SV.flush(Sf); const ms = Number(process.hrtime.bigint() - t0) / 1e6; St().saveMeta(T.meta);
++  SV = await restart(); const d = SV.loadWorld(o.key), has = d && Object.values(d.chunks).some(ch => (ch.c || []).some(s => s.id === c.id));
++  ok('H9 hide flush: an edit made a moment before the app is hidden is on disk after a restart; the flush takes < 30 ms here', r && has && ms < 30, { ms: +ms.toFixed(2), has }); }
++// ---------- H.10 the guide hint progress is the player's (profile), not one world's
++if (!ONLY || ONLY === 'guide') { T.DB.clear(); let SV = await boot(); let o = enter({ useed: 91 }); o.Sf.mods.guide = { step: 3, done: false, id: 'cX', oh: { pinch: 2 }, ohd: { tap: 1 } }; SV.markAt(o.Sf, o.Sf.view.cx, o.Sf.view.cy); leave(o);
++  SV = await restart(); o = enter({ useed: 92 }); const g = o.Sf.mods.guide;
++  ok('H10 guide hint counters travel with the player to a new world (the guide ohm id stays with its world)', g && g.step === 3 && g.oh && g.oh.pinch === 2 && g.ohd.tap === 1 && g.id !== 'cX', g); }
++console.log(res.every(Boolean) ? 'ALL OK' : 'SOME FAILED', res.filter(Boolean).length + '/' + res.length);
++process.exit(0);
++})().catch(e => { console.error(e); console.log('SOME FAILED (exception)'); process.exit(1); });

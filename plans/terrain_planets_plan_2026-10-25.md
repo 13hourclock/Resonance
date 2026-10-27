@@ -1,0 +1,36 @@
+# Terrain and planets plan (Game Dev, Oct 25 2026 3:45 AM MDT). Plan only, all proposals.
+Asked by Wilbow 3:42-3:43 AM: "Procedurally terrain and planets to explore" / "Reference the old game too" / "And our scales" / "Scales of size too".
+
+1 SIZES on one continuous pinch-zoom: tiny worlds (today's worlds inside worlds) -> ground (ohms live; pulses/dents with music, footing steady) -> planet (ground curves into round planet, walk wraps around) -> space (planets orbit a star, each orbit a whole number of bars) -> galaxy later. Pinch in on another planet to land; sound changes on next bar/phrase, no cuts.
+2 TERRAIN: rolling hills from seed, rarer craters/cliffs/terraces, seas on wet planets; colour hooks for Visuals. Each region leans to own home note, scale family, tempo feel, timbre; neighbours blend, no borders. Ground material colours sound (hard echoes, hollows boom, wet dulls). Ground you stand on stays still; jams leave dents that relax. Played-in places heal and invite jams. Each layer seeds/nudges the next.
+3 PLANETS from seed: terrain style (rocky, ocean, icy, cloud giant with floor), colours, home-note leaning, tempo (simple ratio of heartbeat), timbre leaning, wildlife sleeping until near. Scales/keys/moods are leanings never locks; moving harmony stays in charge; place adds gentle pull like one quiet extra voice; jams can leave and return. Rough terrain leans darker, lush brighter, continuous weights.
+4 Q41 (41C): home note leans toward an om overtone (e.g. 3:2, 5:4); strength by context (more in calm healed places, less in busy jams, zero allowed). Neighbours tend a fourth/fifth apart.
+  Q300 planet speeds: A own simple multiple of heartbeat, neighbours drift together when jamming/healing (GD rec) B one shared tempo, differ in feel C fully independent D context.
+5 SIZE AND MUSIC: 5a tempo A bigger=slower cycles, whole bars, tiny subdivide, shared heartbeat (rec) B same tempo C context. 5b register A bigger=lower, planet hums om octaves down, space plays soft chord of home notes (rec) B same register, timbre changes C context. 5c overtones A deeper tiny world reveals overtones of the sound zoomed into (rec) B random tunings as now C context. 5d om A one om everywhere, each size a different octave/overtone (rec) B each planet own om C context.
+6 CONSISTENCY: child seed = parent seed + position; changes saved as small diffs; orbits on music clock.
+7 OLD GAME: Carry: round seamless planets (planet.js), steady landing, biomes and landmarks (spires, crystals, geysers, arches), lazy chunks, bar-multiple orbits, ground material colouring sound (field.js), pools and far chime (later), plants/critters from music (later). Rework: 480-system galaxy (lazy), galaxy music personality -> continuous leanings, star physics -> optional tempo leaning, separate cameras -> seamless zoom (done), planet tonic once a day -> slow leanings. Later/out: throwing into orbit, walking to moons. Out: one key per jam, jam leader (fudged); ark home moon, walking stick, first strike on rock, end-of-journey cadence (lore). Restored Oct 25 (rollback): one tradition per planet for now, with regions blending (his 8:55 PM Oct 24 words; build it); the om at low C 64 Hz matched to the heartbeat (his 10:40 PM Oct 24 card pick; build it).
+8 PERFORMANCE: ground ~1.5 ms, planet <=1 ms, space <=0.6 ms; look ~3 ms. Far planets ~100 bytes, ohms sleep, catch up from clock. Beds <=2 voices per size.
+9 GESTURES: nothing new (pinch, snap, two-finger pan). Old double-tap-to-fly-home replaced by zoom out and in on home glow.
+10 SMALLEST FIRST STEP (~45 min): pinch out past home, ridgeline curves into round planet, quiet om hum fades in, walking far wraps around, pinch in returns home.
+11 STEPS (GD minutes): 1 curve+wrap 45; 2 space with 2-5 orbiting planets, landing brings home note/tempo on next bar 60; 3 terrain styles, biomes, landmarks, colour hooks 50; 4 regions with blended leanings + place pull on harmony 30; 5 chunks, sleep, budgets 40; 6 wildlife with ohms work 60+.
+12 MORE: 12b planets per system A 2-6 by seed (rec) B fixed C context. 12c home planet A random start, home is wherever you are (rec) B fixed home C context. 12d galaxy A later (rec) B now C context.
+Open for Music Theory (not sent): place pull on harmony = one extra vote, or tie-break only?
+
+## Changeable terrain (GD 3:50 AM, after Wilbow 3:49 "Also the terrain should be changeable not static.")
+Five mixing ways: music over time (harmony raises/greens, long tension erodes, resolving heals; minutes); ohms by genes/context dig hollows (boom), pile stones (echo), grow moss/crystal, wear paths (no roles); player: two fingers resting on bare ground + sing/hum (low presses, high lifts, long spreads); time and weather/seasons on music clock, per-planet leanings; lasting vs temporary (repeated becomes lasting).
+Sound via ground material -> matrix place sources. Saving: per-chunk diffs 1-4 KB, capped. Perf: once per bar, nearby chunks, 0.1-0.3 ms/bar.
+Steps: music change + lasting diffs into step 5 (+25); ohms shaping into step 6 (+30); player shaping +20 any step; weather/seasons new step 7 (45).
+Questions: T1 how you shape: A sing/hum two fingers on ground (rec) B drag after hold C drop/carry objects D context. T2 what lasts: A repeated lasts, one-offs fade (rec) B all lasts C all fades to seed D context. T3 music damage: A tension erodes, resolving heals (rec) B only builds C context. T4 weather/seasons: A yes, music clock, per planet (rec) B weather only C later D context. T5 ohms reshape: A genes/learning/context, no roles (rec) B only where they jam C context.
+5a=C proposed context: music busyness/tension, place mood, planet seed, player's tapped tempo, zoom (tendency). All matrix sources, next-bar changes, toggles.
+## Answers so far: 5a C (3:49), 5b A (3:50).
+
+Wilbow 3:50 AM: "Destructable/foldable terrain" (proposals requested from GD)
+Answer: 5c A (3:51)
+
+## Destructible / foldable (GD 3:51 AM)
+Engine change: per-chunk solidity grid ~64x32, traced outline on change, cached draw; ~0.2 ms retrace, ~2 KB/chunk; planet view stays height ring. 60 min.
+Destructible: caused by big moments, long clashes, ohms (genes/context), player. Cracks, shatter, collapse, craters, caves. Breaking sounds tuned to chord; after: caves echo, rubble rattles, fresh rock rings. Debris capped ~24, links to effects as objects.
+Foldable readings: F-A crease like paper/cloth (tension creases, om smooths); F-B fold over itself (overhangs, arches, tubes that resonate); F-C space folding (harmonising far places touch, glowing seam, pinch through; tiny worlds as folded pockets); F-D context. Overtones set crease placement.
+Questions: D1 how you break: A loud held clash singing to ground (rec) B hard fast taps C only music/ohms D context. D2 healing: A heals with harmony, used caves stay (rec) B permanent C all heals D context. D3 size: A local few ohm-lengths (rec) B hillsides in big moments C context. F1 which fold: A/B/C or D context (rec A and C first, then B). F2 fold by touch: A voice only, slide pitch with two fingers resting (rec) B two fingers drag apart/together (zoom clash risk) C only music/ohms D context.
+Sizes: grid 60, breaking 50, crease 30, overhangs 45, space seams 45 (after planet travel). Smallest first: grid + ~30: crack with tuned crackle on huge swell, small crater stays.
+Answer: 5d C (3:51)
